@@ -252,7 +252,7 @@
     "pretest": "npm run compile",
     "test": "node --test \"out/test/unit/**/*.test.js\"",
     "test:integration": "npm run compile && vscode-test",
-    "package": "npx --yes @vscode/vsce@^4 package"
+    "package": "npm run compile && npx --yes @vscode/vsce@^4 package"
   },
   "devDependencies": {
     "@types/mocha": "^10.0.10",
