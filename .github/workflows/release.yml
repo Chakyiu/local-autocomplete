@@ -1,0 +1,30 @@
+name: Release
+
+# Pushing a tag like v0.2.0 builds the .vsix and puts it on that release, so anyone can install it
+# without waiting for a Marketplace listing.
+on:
+  push:
+    tags: ['v*']
+
+jobs:
+  vsix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: npm run package -- --out local-autocomplete.vsix
+      - uses: actions/upload-artifact@v4
+        with:
+          name: local-autocomplete-vsix
+          path: local-autocomplete.vsix
+      - name: Attach the vsix to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" --generate-notes --confirm local-autocomplete.vsix \
+            || gh release upload "$GITHUB_REF_NAME" local-autocomplete.vsix --clobber

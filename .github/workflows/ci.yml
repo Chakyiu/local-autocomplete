@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  unit:
+    name: Compile and unit tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run format:check
+      # pretest compiles first, so this also proves tsc is happy on every OS.
+      - run: npm test
+
+  integration:
+    name: VS Code integration tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      # vscode-test downloads a real VS Code and starts it, which needs a display and a few
+      # Electron libraries that the runner image does not guarantee.
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends xvfb libgbm1 libnss3 libasound2t64
+      - run: xvfb-run --auto-servernum npm run test:integration

@@ -5,6 +5,12 @@ import { flippedFileSetting, resolveEnablement, type Enablement } from './core/e
 
 const FILE_SETTINGS_KEY = 'fileSettings';
 
+/**
+ * Ceiling on how many per-file choices are remembered. They are keyed by URI, so without a limit a
+ * long-lived profile would keep one entry for every file it ever had open.
+ */
+const MAX_FILE_SETTINGS = 200;
+
 /** Editors that get completions. Output panes, diff views, the commit message box, etc. do not. */
 export const SUPPORTED_DOCUMENTS: vscode.DocumentSelector = [
   { scheme: 'file' },
@@ -59,6 +65,15 @@ export class EnablementStore implements vscode.Disposable {
       vscode.workspace.onDidCloseTextDocument((document) => {
         if (document.uri.scheme === 'untitled') this.untitledFileSettings.delete(document.uri.toString());
       }),
+      // A deleted or renamed file has no reason to keep its choice around.
+      vscode.workspace.onDidDeleteFiles((event) => {
+        const gone = new Set(event.files.map((uri) => uri.toString()));
+        void this.pruneFileSettings((key) => gone.has(key));
+      }),
+      vscode.workspace.onDidRenameFiles((event) => {
+        const gone = new Set(event.files.map(({ oldUri }) => oldUri.toString()));
+        void this.pruneFileSettings((key) => gone.has(key));
+      }),
     ];
   }
 
@@ -82,17 +97,31 @@ export class EnablementStore implements vscode.Disposable {
     return !this.disabledLanguages().includes(languageId);
   }
 
-  async setEnabledEverywhere(enabled: boolean): Promise<void> {
-    await updateSetting('enable', enabled);
+  async setEnabledEverywhere(enabled: boolean, resource?: vscode.Uri): Promise<void> {
+    await updateSetting('enable', enabled, resource);
   }
 
-  async setLanguageEnabled(languageId: string, enabled: boolean): Promise<void> {
+  async setLanguageEnabled(languageId: string, enabled: boolean, resource?: vscode.Uri): Promise<void> {
     const others = this.disabledLanguages().filter((id) => id !== languageId);
-    await updateSetting('disabledLanguages', enabled ? others : [...others, languageId]);
+    await updateSetting('disabledLanguages', enabled ? others : [...others, languageId], resource);
   }
 
   async toggleFile(document: vscode.TextDocument): Promise<void> {
     await this.setFileSetting(document, flippedFileSetting(this.get(document)));
+  }
+
+  /** Drops remembered per-file choices the predicate matches, e.g. files that no longer exist. */
+  async pruneFileSettings(matches: (uri: string) => boolean): Promise<void> {
+    const settings = this.storedFileSettings();
+    const kept: Record<string, boolean> = {};
+    let dropped = 0;
+    for (const [key, value] of Object.entries(settings)) {
+      if (matches(key)) dropped++;
+      else kept[key] = value;
+    }
+    if (dropped === 0) return;
+    await this.storage.update(FILE_SETTINGS_KEY, Object.keys(kept).length > 0 ? kept : undefined);
+    this.changed.fire();
   }
 
   async forgetFileSettings(): Promise<void> {
@@ -121,7 +150,16 @@ export class EnablementStore implements vscode.Disposable {
     } else {
       const settings = { ...this.storedFileSettings() };
       if (value === undefined) delete settings[key];
-      else settings[key] = value;
+      else {
+        // Oldest first: the entries people still have open get written again after they are dropped.
+        const keys = Object.keys(settings);
+        while (keys.length >= MAX_FILE_SETTINGS) {
+          const oldest = keys.shift();
+          if (oldest === undefined) break;
+          delete settings[oldest];
+        }
+        settings[key] = value;
+      }
       await this.storage.update(FILE_SETTINGS_KEY, Object.keys(settings).length > 0 ? settings : undefined);
     }
     this.changed.fire();

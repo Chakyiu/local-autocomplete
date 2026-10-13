@@ -1,0 +1,9 @@
+out/
+node_modules/
+.vscode-test/
+images/
+package-lock.json
+*.vsix
+README.md
+CHANGELOG.md
+LICENSE

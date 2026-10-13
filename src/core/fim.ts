@@ -42,7 +42,10 @@ export const FIM_FORMATS: Readonly<Record<FimTemplateId, FimFormat>> = {
   },
   codestral: {
     template: '[SUFFIX]{suffix}[PREFIX]{prefix}',
-    stop: ['</s>', '[PREFIX]', '[SUFFIX]', '[MIDDLE]'],
+    // Current mistral-common ends a Codestral FIM completion with the plain </s> eos and has no STR
+    // tokens; the older Codestral tokenizers, and GGUF builds derived from them, end with [/STR].
+    // Listing both costs nothing and covers either vocabulary.
+    stop: ['</s>', '[/STR]', '[PREFIX]', '[SUFFIX]', '[MIDDLE]'],
   },
 };
 
@@ -64,7 +67,11 @@ export interface ResolvedFimFormat {
   guessed: boolean;
 }
 
-export function resolveFimFormat(setting: FimTemplateSetting, model: string, customTemplate: string): ResolvedFimFormat {
+export function resolveFimFormat(
+  setting: FimTemplateSetting,
+  model: string,
+  customTemplate: string,
+): ResolvedFimFormat {
   if (setting === 'custom') return { id: 'custom', format: { template: customTemplate, stop: [] }, guessed: false };
   if (setting !== 'auto') return { id: setting, format: FIM_FORMATS[setting], guessed: false };
   const detected = detectFimTemplate(model);

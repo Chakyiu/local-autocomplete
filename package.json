@@ -2,14 +2,19 @@
   "name": "local-autocomplete",
   "displayName": "Local Autocomplete",
   "description": "Inline code completions from a local LLM (Ollama, LM Studio, llama.cpp, vLLM), switchable per file, per language, or everywhere from the status bar.",
-  "version": "0.1.0",
+  "version": "0.3.0",
   "publisher": "ChakyiuLI",
   "license": "MIT",
-  "private": true,
+  "icon": "images/icon.png",
   "repository": {
     "type": "git",
     "url": "https://github.com/ChakyiuLI/local-autocomplete.git"
   },
+  "bugs": {
+    "url": "https://github.com/ChakyiuLI/local-autocomplete/issues"
+  },
+  "homepage": "https://github.com/ChakyiuLI/local-autocomplete#readme",
+  "changelog": "https://github.com/ChakyiuLI/local-autocomplete/blob/main/CHANGELOG.md",
   "engines": {
     "vscode": "^1.90.0"
   },
@@ -70,6 +75,11 @@
         "category": "Local Autocomplete"
       },
       {
+        "command": "localAutocomplete.setApiKey",
+        "title": "Set API Key",
+        "category": "Local Autocomplete"
+      },
+      {
         "command": "localAutocomplete.forgetFileSettings",
         "title": "Forget All Per-File Settings",
         "category": "Local Autocomplete"
@@ -115,11 +125,13 @@
           "type": "string",
           "enum": [
             "ollama",
-            "openai-compatible"
+            "openai-compatible",
+            "openai-chat"
           ],
           "markdownEnumDescriptions": [
             "[Ollama](https://ollama.com), through its native `/api/generate` API.",
-            "Any server with an OpenAI-style `/v1/completions` endpoint: LM Studio, llama.cpp's `llama-server`, vLLM, LocalAI, …"
+            "Any server with an OpenAI-style `/v1/completions` endpoint: LM Studio, llama.cpp's `llama-server`, vLLM, LocalAI, …",
+            "A server that answers **only** `/v1/chat/completions` and returns 404 for `/v1/completions`. The prompt is sent as one user message. Made for gateways and proxies, not for good completions: chat models are trained to talk, so set `#localAutocomplete.fimTemplate#` to `custom` and write an instruction prompt."
           ],
           "default": "ollama",
           "scope": "machine",
@@ -131,7 +143,7 @@
           "default": "",
           "scope": "machine",
           "order": 3,
-          "markdownDescription": "Base URL of the server. Leave empty for the default of `#localAutocomplete.provider#`: `http://127.0.0.1:11434` for Ollama, `http://127.0.0.1:1234/v1` for OpenAI-compatible servers (LM Studio's default; `llama-server` listens on `http://127.0.0.1:8080/v1`)."
+          "markdownDescription": "Base URL of the server, including a path prefix such as `/v1`. Leave empty for the default of `#localAutocomplete.provider#`: `http://127.0.0.1:11434` for Ollama, `http://127.0.0.1:1234/v1` for OpenAI-compatible servers (LM Studio's default; `llama-server` listens on `http://127.0.0.1:8080/v1`)."
         },
         "localAutocomplete.model": {
           "type": "string",
@@ -144,7 +156,8 @@
           "default": "",
           "scope": "machine",
           "order": 5,
-          "markdownDescription": "Sent as a bearer token. Only needed if your server requires one."
+          "deprecationMessage": "The API key now lives in your keychain. Run \"Local Autocomplete: Set API Key\" and delete this setting.",
+          "markdownDescription": "Deprecated: only read once, to move an existing key into secret storage."
         },
         "localAutocomplete.fimTemplate": {
           "type": "string",
@@ -202,6 +215,7 @@
             "Only complete the current line."
           ],
           "default": "auto",
+          "scope": "language-overridable",
           "order": 9,
           "description": "When completions may span several lines."
         },
@@ -210,6 +224,7 @@
           "default": 128,
           "minimum": 1,
           "maximum": 4096,
+          "scope": "language-overridable",
           "order": 10,
           "description": "Maximum number of tokens to generate per completion."
         },
@@ -218,6 +233,7 @@
           "default": 0.1,
           "minimum": 0,
           "maximum": 2,
+          "scope": "language-overridable",
           "order": 11,
           "description": "Sampling temperature. Lower values give more predictable completions."
         },
@@ -226,6 +242,7 @@
           "default": 200,
           "minimum": 0,
           "maximum": 5000,
+          "scope": "language-overridable",
           "order": 12,
           "description": "How long to wait after you stop typing before asking the model, in milliseconds."
         },
@@ -233,15 +250,63 @@
           "type": "integer",
           "default": 4000,
           "minimum": 0,
+          "maximum": 100000,
+          "scope": "language-overridable",
           "order": 13,
-          "description": "Maximum number of characters before the cursor to send as context (roughly 3-4 characters per token). More context can improve completions but makes requests slower, and the whole prompt must fit in the model's context window."
+          "markdownDescription": "Maximum number of characters before the cursor to send as context (roughly 3-4 characters per token). More context can improve completions but makes requests slower, and the prompt has to fit the model's context window: see `#localAutocomplete.maxContextTokens#`."
         },
         "localAutocomplete.maxSuffixChars": {
           "type": "integer",
           "default": 1000,
           "minimum": 0,
+          "maximum": 100000,
+          "scope": "language-overridable",
           "order": 14,
           "description": "Maximum number of characters after the cursor to send as context."
+        },
+        "localAutocomplete.stream": {
+          "type": "boolean",
+          "default": true,
+          "order": 15,
+          "markdownDescription": "Read the reply as it is generated and cancel the request as soon as the completion is settled, instead of waiting for the model to spend all of `#localAutocomplete.maxTokens#`. The ghost text still appears in one piece, because VS Code shows a completion all at once, but it appears sooner and the model's remaining work is dropped."
+        },
+        "localAutocomplete.timeoutMs": {
+          "type": "integer",
+          "default": 30000,
+          "minimum": 1000,
+          "maximum": 600000,
+          "order": 16,
+          "markdownDescription": "How long to wait for the server, in milliseconds. With `#localAutocomplete.stream#` on, this is the wait allowed between pieces of the reply, so a slow start still gets the full time. Loading a model into memory for the first request can take a minute or two."
+        },
+        "localAutocomplete.maxContextTokens": {
+          "type": "integer",
+          "default": 8192,
+          "minimum": 0,
+          "maximum": 1000000,
+          "order": 17,
+          "markdownDescription": "The largest context window to ask Ollama to reserve, in tokens (`num_ctx`). It is only sent when the prompt plus `#localAutocomplete.maxTokens#` needs more than Ollama's own default of 4096, so a context you configured in Ollama is never lowered. Ollama cuts the front off a prompt that does not fit, without telling the extension, which is why this matters. Set to 0 to never send it. A bigger window uses more memory and can push the model out of your GPU."
+        },
+        "localAutocomplete.keepAlive": {
+          "type": "string",
+          "default": "",
+          "order": 18,
+          "markdownDescription": "How long Ollama keeps the model loaded after a request: `5m`, `30s`, `-1` to keep it forever, `0` to unload it right away. Leave empty for Ollama's own default of 5 minutes. Only Ollama uses this setting."
+        },
+        "localAutocomplete.showStatusBar": {
+          "type": "string",
+          "enum": [
+            "always",
+            "iconOnly",
+            "hidden"
+          ],
+          "enumDescriptions": [
+            "The icon followed by the word Autocomplete.",
+            "Just the icon.",
+            "No status bar item. Use the Local Autocomplete commands from the Command Palette instead."
+          ],
+          "default": "always",
+          "order": 19,
+          "description": "How much of the status bar this extension takes up."
         }
       }
     }
@@ -249,6 +314,8 @@
   "scripts": {
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
     "pretest": "npm run compile",
     "test": "node --test \"out/test/unit/**/*.test.js\"",
     "test:integration": "npm run compile && vscode-test",
@@ -260,6 +327,7 @@
     "@types/vscode": "~1.90.0",
     "@vscode/test-cli": "^0.0.15",
     "@vscode/test-electron": "^3.1.0",
+    "prettier": "^3.9.10",
     "typescript": "^7.0.2"
   }
 }

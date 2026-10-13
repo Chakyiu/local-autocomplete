@@ -1,10 +1,18 @@
 import * as vscode from 'vscode';
+import type { ApiKeyStore } from './apiKey';
 import { readSettings } from './config';
-import { BackendError, createBackend } from './core/backends';
+import {
+  BackendError,
+  createBackend,
+  numCtxToRequest,
+  requiredContextTokens,
+  type CompletionRequest,
+} from './core/backends';
 import { CompletionCache } from './core/cache';
-import { extractContext } from './core/context';
 import { renderFimPrompt, resolveFimFormat } from './core/fim';
-import { allowMultiline, cleanCompletion, replaceableSuffixLength } from './core/postprocess';
+import { planCompletion } from './core/plan';
+import { cleanCompletion, createFinalityCheck, replaceableSuffixLength } from './core/postprocess';
+import { backendOptions, type Settings } from './core/settings';
 import type { EnablementStore } from './enablementStore';
 import type { RequestReporter } from './reporter';
 import type { StatusBar } from './statusBar';
@@ -12,11 +20,13 @@ import type { StatusBar } from './statusBar';
 export class LocalCompletionProvider implements vscode.InlineCompletionItemProvider {
   private readonly cache = new CompletionCache();
   private warnedAboutFormatFor: string | undefined;
+  private warnedAboutContextFor: string | undefined;
 
   constructor(
     private readonly enablement: EnablementStore,
     private readonly status: StatusBar,
     private readonly reporter: RequestReporter,
+    private readonly apiKeys: ApiKeyStore,
     private readonly log: vscode.LogOutputChannel,
   ) {}
 
@@ -32,36 +42,31 @@ export class LocalCompletionProvider implements vscode.InlineCompletionItemProvi
   ): Promise<vscode.InlineCompletionItem[] | undefined> {
     if (!this.enablement.get(document).enabled) return undefined;
 
-    const settings = readSettings();
-    // While the suggestion list is open, complete as if its selected item had been accepted.
+    const settings = readSettings(document.uri);
     const selected = context.selectedCompletionInfo;
-    const accepted = selected?.text ?? '';
-    const start = selected?.range.start ?? position;
-    const end = selected?.range.end ?? position;
-
-    const lineSuffix = document.lineAt(end.line).text.slice(end.character);
-    // The cursor is inside a word: the user is editing it, not writing new code.
-    if (/^[\p{L}\p{N}_$]/u.test(lineSuffix)) return undefined;
-
-    const window = extractContext(
-      { lineCount: document.lineCount, lineText: (line) => document.lineAt(line).text },
-      start,
-      end,
-      settings.maxPrefixChars,
-      settings.maxSuffixChars,
-    );
-    const prefix = window.prefix + accepted;
-    const linePrefix = document.lineAt(start.line).text.slice(0, start.character) + accepted;
-    const multiline = allowMultiline(settings.multiline, linePrefix, lineSuffix);
+    const plan = planCompletion({
+      document: { lineCount: document.lineCount, lineText: (line) => document.lineAt(line).text },
+      position,
+      selected: selected && { text: selected.text, start: selected.range.start, end: selected.range.end },
+      multiline: settings.multiline,
+      maxPrefixChars: settings.maxPrefixChars,
+      maxSuffixChars: settings.maxSuffixChars,
+    });
+    if (plan.suppressed) return undefined;
 
     const toItems = (completion: string): vscode.InlineCompletionItem[] | undefined => {
-      const replaced = replaceableSuffixLength(completion, lineSuffix);
+      const replaced = replaceableSuffixLength(completion, plan.lineSuffix);
       if (replaced === completion.length) return undefined;
-      const range = new vscode.Range(start, end.translate(0, replaced));
-      return [new vscode.InlineCompletionItem(accepted + completion, range)];
+      const range = new vscode.Range(
+        plan.start.line,
+        plan.start.character,
+        plan.end.line,
+        plan.end.character + replaced,
+      );
+      return [new vscode.InlineCompletionItem(plan.accepted + completion, range)];
     };
 
-    const cached = this.cache.get(prefix, window.suffix);
+    const cached = this.cache.get(plan.prefix, plan.suffix);
     if (cached !== undefined) return toItems(cached);
 
     const automatic = context.triggerKind === vscode.InlineCompletionTriggerKind.Automatic;
@@ -75,33 +80,50 @@ export class LocalCompletionProvider implements vscode.InlineCompletionItemProvi
           'If completions look wrong, set localAutocomplete.fimTemplate.',
       );
     }
-    const stop = [...fim.format.stop, ...settings.stopSequences, ...(multiline ? [] : ['\n'])];
-    const prompt = renderFimPrompt(fim.format.template, prefix, window.suffix);
+    const stop = [...fim.format.stop, ...settings.stopSequences, ...(plan.multiline ? [] : ['\n'])];
+    const prompt = renderFimPrompt(fim.format.template, plan.prefix, plan.suffix);
+    const cleanup = {
+      multiline: plan.multiline,
+      linePrefix: plan.linePrefix,
+      suffix: plan.suffix,
+      stop,
+    };
 
     const abort = new AbortController();
     const cancellation = token.onCancellationRequested(() => abort.abort());
     const startedAt = Date.now();
     this.status.requestStarted();
     try {
-      const result = await createBackend(settings).complete({
+      const request: CompletionRequest = {
         prompt,
         stop,
         maxTokens: settings.maxTokens,
         temperature: settings.temperature,
+        contextTokens: this.askedContextTokens(prompt, settings),
         signal: abort.signal,
-      });
+      };
+      const backend = createBackend(backendOptions(settings, await this.apiKeys.get()));
+      // Streaming does not make the ghost text appear sooner word by word — VS Code shows an
+      // InlineCompletionItem all at once — but it lets us stop as soon as the completion is settled,
+      // which is usually well before the model runs out of tokens.
+      const result = settings.stream
+        ? await backend.streamComplete(request, createFinalityCheck(cleanup))
+        : await backend.complete(request);
+
+      if (token.isCancellationRequested || abort.signal.aborted) return undefined;
       this.reporter.succeeded();
-      const completion = cleanCompletion(result.text, { multiline, linePrefix, suffix: window.suffix, stop });
+      const completion = cleanCompletion(result.text, cleanup);
       this.log.debug(
-        `${settings.model} (${fim.id} format): ${Date.now() - startedAt} ms, ${result.tokens ?? '?'} tokens, ` +
+        `${settings.model} (${fim.id} format${settings.stream ? ', streamed' : ''}): ${Date.now() - startedAt} ms, ` +
+          `${result.tokens ?? '?'} tokens, ` +
           (completion ? `${completion.length} characters kept` : 'nothing usable'),
       );
       this.log.trace(`Prompt:\n${prompt}\nOutput:\n${result.text}`);
       if (completion === '') return undefined;
-      this.cache.set(prefix, window.suffix, completion);
+      this.cache.set(plan.prefix, plan.suffix, completion);
       return token.isCancellationRequested ? undefined : toItems(completion);
     } catch (error) {
-      if (abort.signal.aborted) return undefined;
+      if (abort.signal.aborted || token.isCancellationRequested) return undefined;
       if (error instanceof BackendError) this.reporter.failed(error, settings);
       else this.log.error(error instanceof Error ? error : String(error));
       return undefined;
@@ -109,6 +131,28 @@ export class LocalCompletionProvider implements vscode.InlineCompletionItemProvi
       cancellation.dispose();
       this.status.requestFinished();
     }
+  }
+
+  /**
+   * How much context to ask the server for, or undefined to let it decide. Ollama cuts the front off
+   * a prompt that does not fit — taking the `fim_prefix` marker with it — and only mentions this in
+   * its own log, so the request has to state the room it needs.
+   */
+  private askedContextTokens(prompt: string, settings: Settings): number | undefined {
+    const needed = requiredContextTokens(prompt, settings.maxTokens);
+    if (settings.maxContextTokens > 0 && needed > settings.maxContextTokens) {
+      const key = `${settings.model}@${settings.maxContextTokens}`;
+      if (this.warnedAboutContextFor !== key) {
+        this.warnedAboutContextFor = key;
+        this.log.warn(
+          `The prompt needs about ${needed} tokens, but localAutocomplete.maxContextTokens is ` +
+            `${settings.maxContextTokens}. The server will drop the oldest part of the prompt, which usually ` +
+            'means unusable completions: lower localAutocomplete.maxPrefixChars, or raise maxContextTokens ' +
+            'if your model can take it.',
+        );
+      }
+    }
+    return numCtxToRequest(needed, settings.maxContextTokens) || undefined;
   }
 }
 

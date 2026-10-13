@@ -1,6 +1,12 @@
 import * as assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { allowMultiline, cleanCompletion, replaceableSuffixLength } from '../../core/postprocess';
+import {
+  allowMultiline,
+  cleanCompletion,
+  createFinalityCheck,
+  isCompletionFinal,
+  replaceableSuffixLength,
+} from '../../core/postprocess';
 
 describe('allowMultiline', () => {
   it('allows several lines on an empty line and after a block opener', () => {
@@ -74,7 +80,10 @@ describe('cleanCompletion', () => {
 
   it('keeps an inner closing brace that matches the next line only when ignoring indentation', () => {
     const completion = 'if (x) {\n    y();\n  }\n  return z;';
-    assert.equal(cleanCompletion(completion, { multiline: true, linePrefix: '  ', suffix: '\n}', stop: [] }), completion);
+    assert.equal(
+      cleanCompletion(completion, { multiline: true, linePrefix: '  ', suffix: '\n}', stop: [] }),
+      completion,
+    );
   });
 });
 
@@ -90,5 +99,53 @@ describe('replaceableSuffixLength', () => {
     assert.equal(replaceableSuffixLength('])', ')]'), 0);
     assert.equal(replaceableSuffixLength('a)\nb', ')'), 0);
     assert.equal(replaceableSuffixLength('abc', '  '), 0);
+  });
+});
+
+describe('isCompletionFinal', () => {
+  const single = { multiline: false, linePrefix: 'const x = ', suffix: '', stop: [] };
+  const insideBlock = { multiline: true, linePrefix: '  ', suffix: '\n}', stop: [] };
+
+  it('settles a single-line completion as soon as the newline arrives', () => {
+    assert.equal(isCompletionFinal('foo', single), false);
+    assert.equal(isCompletionFinal('foo ', single), false);
+    assert.equal(isCompletionFinal('foo\nbar', single), true);
+  });
+
+  it('settles on a stop sequence even in the middle of a line', () => {
+    const options = { ...single, stop: ['<|endoftext|>'] };
+    assert.equal(isCompletionFinal('foo<|endoftext|>bar', options), true);
+  });
+
+  it('settles a multi-line completion once the block has clearly ended', () => {
+    assert.equal(isCompletionFinal('a();\n', insideBlock), false);
+    assert.equal(isCompletionFinal('a();\n  b();\n', insideBlock), false);
+    assert.equal(isCompletionFinal('a();\n}\n', insideBlock), true);
+    assert.equal(isCompletionFinal('a();\nb();\nanything', insideBlock), true);
+  });
+
+  it('settles when the completion reaches text that is already in the document', () => {
+    const options = { ...insideBlock, suffix: '\n  return x;' };
+    assert.equal(isCompletionFinal('a();\n  return x;\n', options), true);
+  });
+
+  it('never settles on a half-written line, which might still turn into the line that closes the block', () => {
+    assert.equal(isCompletionFinal('a();\n}', insideBlock), false);
+    assert.equal(isCompletionFinal('a();\nb();', insideBlock), false);
+  });
+});
+describe('createFinalityCheck', () => {
+  it('judges the whole reply so far, not just the last chunk', () => {
+    const check = createFinalityCheck({ multiline: true, linePrefix: '  ', suffix: '', stop: [] });
+    assert.equal(check('  y();'), false);
+    assert.equal(check('\n'), false);
+    assert.equal(check('z();'), false);
+    assert.equal(check('\n'), true);
+  });
+
+  it('notices a stop sequence that arrives split across two chunks', () => {
+    const check = createFinalityCheck({ multiline: true, linePrefix: '', suffix: '', stop: ['[/STR]'] });
+    assert.equal(check('a();\n[/'), false);
+    assert.equal(check('STR]more'), true);
   });
 });

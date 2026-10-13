@@ -1,6 +1,8 @@
 import * as vscode from 'vscode';
+import type { ApiKeyStore } from './apiKey';
 import { describeServer, readSettings, updateSetting } from './config';
 import { BackendError, createBackend } from './core/backends';
+import { backendOptions } from './core/settings';
 import { fileEnabled } from './core/enablement';
 import { detectFimTemplate } from './core/fim';
 import { fileName, isSupported, type EnablementStore } from './enablementStore';
@@ -12,7 +14,12 @@ interface MenuItem extends vscode.QuickPickItem {
 }
 
 /** The menu behind the status bar item. */
-export async function showMenu(enablement: EnablementStore, status: StatusBar, extensionId: string): Promise<void> {
+export async function showMenu(
+  enablement: EnablementStore,
+  status: StatusBar,
+  apiKeys: ApiKeyStore,
+  extensionId: string,
+): Promise<void> {
   const editor = vscode.window.activeTextEditor;
   const document = editor && isSupported(editor.document) ? editor.document : undefined;
   const items: MenuItem[] = [];
@@ -28,25 +35,35 @@ export async function showMenu(enablement: EnablementStore, status: StatusBar, e
         run: () => enablement.toggleFile(document),
       },
       {
-        label: state.language ? `$(circle-slash) Disable for ${language} files` : `$(check) Enable for ${language} files`,
+        label: state.language
+          ? `$(circle-slash) Disable for ${language} files`
+          : `$(check) Enable for ${language} files`,
         description: state.file === undefined ? undefined : `${name} keeps its own setting`,
-        run: () => enablement.setLanguageEnabled(document.languageId, !state.language),
+        run: () => enablement.setLanguageEnabled(document.languageId, !state.language, document.uri),
       },
     );
   }
 
   const everywhere = enablement.enabledEverywhere();
+  const apiKeySet = await apiKeys.isSet();
   items.push(
     {
       label: everywhere ? '$(circle-slash) Disable everywhere' : '$(check) Enable everywhere',
-      run: () => enablement.setEnabledEverywhere(!everywhere),
+      run: () => enablement.setEnabledEverywhere(!everywhere, document?.uri),
     },
     { label: '', kind: vscode.QuickPickItemKind.Separator },
     {
       label: '$(hubot) Select model…',
-      description: readSettings().model,
+      description: readSettings(document?.uri).model,
       run: () => vscode.commands.executeCommand('localAutocomplete.selectModel'),
     },
+    {
+      label: apiKeySet ? '$(key) Change API key…' : '$(key) Set API key…',
+      description: apiKeySet ? 'kept in your keychain' : 'only needed by OpenAI-compatible servers',
+      run: () => setApiKey(apiKeys),
+    },
+    ...(apiKeySet ? [{ label: '$(trash) Remove API key', run: () => apiKeys.clear() } satisfies MenuItem] : []),
+    { label: '', kind: vscode.QuickPickItemKind.Separator },
     {
       label: '$(gear) Settings',
       run: () => vscode.commands.executeCommand('workbench.action.openSettings', `@ext:${extensionId}`),
@@ -64,14 +81,36 @@ export async function showMenu(enablement: EnablementStore, status: StatusBar, e
   await picked?.run?.();
 }
 
-export async function selectModel(log: vscode.LogOutputChannel): Promise<void> {
+/**
+ * Stores the API key in secret storage. Pressing Enter with an empty box removes the stored key, so
+ * there is no separate command to forget it; Esc leaves everything as it was.
+ */
+export async function setApiKey(apiKeys: ApiKeyStore): Promise<void> {
+  const current = await apiKeys.get();
+  const entered = await vscode.window.showInputBox({
+    title: 'Local Autocomplete: API Key',
+    prompt: 'Sent as "Authorization: Bearer …" to an OpenAI-compatible server.',
+    password: true,
+    ignoreFocusOut: true,
+    placeHolder: current === '' ? 'Enter the API key' : 'Enter a new key, or nothing to remove the stored one',
+  });
+  if (entered === undefined) return;
+  if (entered.trim() === '') {
+    if (current !== '') await apiKeys.clear();
+    return;
+  }
+  await apiKeys.set(entered);
+  void vscode.window.showInformationMessage('Local Autocomplete: API key saved in your keychain.');
+}
+
+export async function selectModel(log: vscode.LogOutputChannel, apiKeys: ApiKeyStore): Promise<void> {
   const settings = readSettings();
   const server = describeServer(settings);
   let models: string[];
   try {
     models = await vscode.window.withProgress(
       { location: vscode.ProgressLocation.Window, title: `Fetching models from ${server}` },
-      () => createBackend(settings).listModels(),
+      async () => createBackend(backendOptions(settings, await apiKeys.get())).listModels(),
     );
   } catch (error) {
     const message = error instanceof BackendError ? error.message : String(error);

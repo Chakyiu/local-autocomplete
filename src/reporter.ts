@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { describeServer, type Settings } from './config';
+import { describeServer, updateSetting, type Settings } from './config';
 import type { BackendError, BackendErrorKind } from './core/backends';
 import type { StatusBar } from './statusBar';
 
@@ -43,10 +43,30 @@ export class RequestReporter {
       const pull = settings.provider === 'ollama' ? `ollama pull ${settings.model}` : undefined;
       const message = `Local Autocomplete: model "${settings.model}" was not found on ${server}.`;
       const choice = pull
-        ? await vscode.window.showWarningMessage(`${message} Download it with "${pull}".`, 'Copy Command', 'Select Model')
+        ? await vscode.window.showWarningMessage(
+            `${message} Download it with "${pull}".`,
+            'Copy Command',
+            'Select Model',
+          )
         : await vscode.window.showWarningMessage(message, 'Select Model');
       if (choice === 'Copy Command' && pull) await vscode.env.clipboard.writeText(pull);
       if (choice === 'Select Model') await vscode.commands.executeCommand('localAutocomplete.selectModel');
+      return;
+    }
+
+    if (error.kind === 'context-overflow') {
+      const choice = await vscode.window.showWarningMessage(
+        `Local Autocomplete: the prompt does not fit the context of ${server}, which was sent up to ` +
+          `${settings.maxPrefixChars} characters before the cursor.`,
+        'Halve the Context',
+        'Open Settings',
+        'Show Log',
+      );
+      if (choice === 'Halve the Context') {
+        await updateSetting('maxPrefixChars', Math.max(500, Math.round(settings.maxPrefixChars / 2)));
+      }
+      if (choice === 'Open Settings') await this.openSettings();
+      if (choice === 'Show Log') this.log.show();
       return;
     }
 
@@ -55,9 +75,11 @@ export class RequestReporter {
         ? `Local Autocomplete can't reach ${server}. ${settings.provider === 'ollama' ? 'Is Ollama running?' : 'Is the server running?'}`
         : `Local Autocomplete: ${error.message}`;
     const choice = await vscode.window.showWarningMessage(message, 'Open Settings', 'Show Log');
-    if (choice === 'Open Settings') {
-      await vscode.commands.executeCommand('workbench.action.openSettings', `@ext:${this.extensionId}`);
-    }
+    if (choice === 'Open Settings') await this.openSettings();
     if (choice === 'Show Log') this.log.show();
+  }
+
+  private async openSettings(): Promise<void> {
+    await vscode.commands.executeCommand('workbench.action.openSettings', `@ext:${this.extensionId}`);
   }
 }

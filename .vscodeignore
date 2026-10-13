@@ -1,9 +1,14 @@
+# Only out/ (compiled), images/, README, CHANGELOG and LICENSE belong in the .vsix.
 .vscode/**
 .vscode-test/**
 .vscode-test.mjs
+.github/**
 src/**
 out/test/**
-**/*.map
+node_modules/**
 tsconfig.json
 .gitignore
-node_modules/**
+.prettierrc.json
+.prettierignore
+**/*.map
+**/*.ts

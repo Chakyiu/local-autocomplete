@@ -49,4 +49,12 @@ describe('describeStatus', () => {
     assert.equal(view.warning, false);
     assert.doesNotMatch(view.tooltip, /Last error/);
   });
+
+  it('takes up less of the status bar when asked to', () => {
+    assert.equal(describeStatus({ ...base, display: 'always' }).text, '$(sparkle) Autocomplete');
+    assert.equal(describeStatus({ ...base, display: 'iconOnly' }).text, '$(sparkle)');
+    assert.equal(describeStatus({ ...base, display: 'iconOnly' }).visible, true);
+    assert.equal(describeStatus({ ...base, display: 'hidden' }).visible, false);
+    assert.equal(describeStatus(base).visible, true, 'hidden has to be asked for');
+  });
 });

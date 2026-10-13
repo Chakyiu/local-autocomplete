@@ -1,5 +1,8 @@
 import type { Enablement } from './enablement';
 
+/** How much of the status bar this extension takes up. */
+export type StatusBarDisplay = 'always' | 'iconOnly' | 'hidden';
+
 export interface StatusInput {
   everywhere: boolean;
   /** The active editor's file; undefined when no supported editor is active. */
@@ -9,6 +12,8 @@ export interface StatusInput {
   error?: string;
   model: string;
   server: string;
+  /** Defaults to 'always'. */
+  display?: StatusBarDisplay;
 }
 
 export interface StatusView {
@@ -17,6 +22,8 @@ export interface StatusView {
   summary: string;
   tooltip: string;
   warning: boolean;
+  /** False when the item is switched off; the menu and the commands still work. */
+  visible: boolean;
 }
 
 export function describeStatus(input: StatusInput): StatusView {
@@ -41,11 +48,13 @@ export function describeStatus(input: StatusInput): StatusView {
   if (input.error && !disabled) tooltip.push(`Last error: ${input.error}`);
   tooltip.push('Click for options');
 
+  const display = input.display ?? 'always';
   return {
-    text: `$(${icon}) Autocomplete`,
+    text: display === 'iconOnly' ? `$(${icon})` : `$(${icon}) Autocomplete`,
     summary,
     tooltip: tooltip.join('\n'),
     warning: !disabled && !input.busy && input.error !== undefined,
+    visible: display !== 'hidden',
   };
 }
 

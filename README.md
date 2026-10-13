@@ -4,6 +4,8 @@ Inline code completions in VS Code from a model that runs on your own machine �
 
 The model is chosen by you, and can be switched per file, per language, or everywhere, from the status bar.
 
+![A ghost-text completion after the cursor](images/1-ghost-text-closeup.png)
+
 ## Requirements
 
 1. A local server that can run a completion model: [Ollama](https://ollama.com), LM Studio, llama.cpp's `llama-server`, vLLM, LocalAI, …
@@ -29,8 +31,32 @@ If the server is not on the default port, set `localAutocomplete.provider` and `
 | LM Studio | `openai-compatible` | `http://127.0.0.1:1234/v1` (default) |
 | llama.cpp `llama-server` | `openai-compatible` | `http://127.0.0.1:8080/v1` |
 | vLLM / LocalAI | `openai-compatible` | `http://host:port/v1` |
+| Anything else that only answers `/v1/chat/completions` | `openai-chat` | `http://host:port/v1` |
 
 Leave `endpoint` empty to use the provider's default. A bare origin such as `http://127.0.0.1:1234` gets `/v1` added for you.
+
+### Chat-only servers
+
+Some proxies and gateways implement `/v1/chat/completions` and answer `/v1/completions` with
+`404: not found`. Pick `openai-chat` for those: the prompt is sent as a single user message, a
+markdown fence around the reply is removed, and chain-of-thought in `reasoning_content` is ignored.
+
+This is a compatibility mode, not a quality one — a chat model talks about code instead of
+continuing it, so set `fimTemplate` to `custom` and give it an instruction instead of
+fill-in-the-middle markers:
+
+```
+Complete the code. Return ONLY the missing code, no explanation and no markdown fence.
+
+Code before the cursor:
+{prefix}
+Code after the cursor:
+{suffix}
+Missing code:
+```
+
+A reasoning model thinks before it answers, so raise `maxTokens` until the reply contains any code
+at all; if it spends the whole budget thinking, the extension says so instead of staying quiet.
 
 ## Turning it on and off
 
@@ -38,9 +64,9 @@ Three switches, most specific wins:
 
 1. **Everywhere** — `localAutocomplete.enable`. Off means off: no request is made, whatever the other settings say.
 2. **Per language** — `localAutocomplete.disabledLanguages`, e.g. `["markdown", "plaintext"]`.
-3. **Per file** — remembered in extension storage, keyed by the file's URI. A notebook cell belongs to its notebook.
+3. **Per file** — remembered in extension storage, keyed by the file's URI. A notebook cell belongs to its notebook. Overrides for files that are deleted or renamed are dropped automatically, and only the 200 most recent files are kept.
 
-The status bar shows which switch decided the current file, and clicking it opens a menu with the three toggles, model selection, settings and the log. The same actions are commands:
+The status bar shows which switch decided the current file, and clicking it opens a menu with the three toggles, model selection, the API key, settings and the log. If you would rather not see it, set `localAutocomplete.showStatusBar` to `iconOnly` or `hidden`. The same actions are commands:
 
 | Command | What it does |
 | --- | --- |
@@ -49,6 +75,7 @@ The status bar shows which switch decided the current file, and clicking it open
 | `Local Autocomplete: Toggle for Current Language` | Adds/removes the language in `disabledLanguages` |
 | `Local Autocomplete: Toggle for Current File` | Overrides for this file only |
 | `Local Autocomplete: Select Model` | Lists the models on the server and sets `localAutocomplete.model` |
+| `Local Autocomplete: Set API Key` | Stores a bearer token in your OS keychain (also clears the deprecated setting) |
 | `Local Autocomplete: Forget All Per-File Settings` | Drops every per-file override |
 | `Local Autocomplete: Show Log` | Opens the output channel |
 
@@ -60,10 +87,10 @@ Per-language and everywhere state are settings, so they sync across machines and
 | --- | --- | --- |
 | `enable` | `true` | Master switch |
 | `disabledLanguages` | `[]` | [Language identifiers](https://code.visualstudio.com/docs/languages/identifiers) where completions are off |
-| `provider` | `ollama` | `ollama` or `openai-compatible` (machine scope) |
+| `provider` | `ollama` | `ollama`, `openai-compatible` or `openai-chat` (machine scope) |
 | `endpoint` | `""` | Base URL; empty for the provider default (machine scope) |
 | `model` | `qwen2.5-coder:1.5b-base` | Name as the server knows it |
-| `apiKey` | `""` | Sent as a bearer token, only if your server needs one (machine scope) |
+| `apiKey` | — | **Deprecated:** the bearer token now lives in your OS keychain — use `Local Autocomplete: Set API Key`. A value already in settings is migrated on startup and the setting is cleared. |
 | `fimTemplate` | `auto` | `auto`, `qwen`, `codellama`, `deepseek`, `starcoder`, `codegemma`, `codestral`, `custom` |
 | `customFimTemplate` | `<|fim_prefix|>{prefix}<|fim_suffix|>{suffix}<|fim_middle|>` | Used when `fimTemplate` is `custom`; must contain `{prefix}` |
 | `stopSequences` | `[]` | Extra sequences that end a completion |
@@ -73,6 +100,17 @@ Per-language and everywhere state are settings, so they sync across machines and
 | `debounceMs` | `200` | Wait after you stop typing before asking the model |
 | `maxPrefixChars` | `4000` | Context before the cursor (~3–4 chars per token) |
 | `maxSuffixChars` | `1000` | Context after the cursor |
+| `stream` | `true` | Read the reply as it arrives, and stop generating once the completion is finished |
+| `timeoutMs` | `30000` | How long to wait for the server. With streaming it is the time allowed **between** chunks, so a slow first token still fails but a steady stream does not |
+| `maxContextTokens` | `8192` | Largest context window the extension may ask Ollama for (`num_ctx`). `0` never sends it and leaves the server in charge |
+| `keepAlive` | `""` | Ollama only: how long to keep the model loaded, e.g. `5m`. Empty uses the server default |
+| `showStatusBar` | `always` | `always`, `iconOnly`, or `hidden` |
+
+`multiline`, `maxTokens`, `temperature`, `debounceMs`, `maxPrefixChars` and `maxSuffixChars` are language-overridable, so a `[python]` block in `settings.json` can ask for longer completions in Python than in JSON:
+
+```json
+{ "localAutocomplete.maxTokens": 64, "[python]": { "localAutocomplete.maxTokens": 256 } }
+```
 
 `fimTemplate: auto` recognises the format from the model name. Each family is trained on its own special tokens, and a mismatch gives poor or empty completions — if the log says the format was guessed, set it explicitly.
 
@@ -84,7 +122,9 @@ Per-language and everywhere state are settings, so they sync across machines and
 - **Single-line completions may overwrite the rest of the line** when it appears in order inside the completion, which avoids duplicated auto-closed brackets and quotes.
 - **Recent completions are cached** (64 entries) keyed by the text around the cursor: typing the start of a suggestion, or deleting back to where it was made, is answered without asking the model again.
 - **The prompt is cut at whole lines** so its start stays put while you type, which lets the server reuse its prompt cache.
-- **Requests time out after 30 s** and are cancelled as soon as you keep typing. The first failure of each kind raises one notification (with *Copy Command* for a missing Ollama model, *Open Settings*, *Show Log*); later ones only mark the status bar and the log, so a stopped server does not pop up on every keystroke.
+- **Completions stream** (`localAutocomplete.stream`). The first characters appear as soon as the server sends them, and the request is closed the moment the completion cannot change any more — a stop sequence landed, or the block clearly ended. Turn it off to get one response back, which is what a server that does not support streaming needs.
+- **The context window is requested, not assumed.** Ollama defaults to 4096 tokens and silently drops the *start* of a longer prompt, which cuts off the `<|fim_prefix|>` marker and produces nonsense. When the prompt needs more, the extension asks for a bigger `num_ctx` (up to `maxContextTokens`) and logs what it did. If a server still refuses, the notification tells you to shrink `maxPrefixChars`.
+- **Requests are cancelled as soon as you keep typing,** and give up after `timeoutMs`. The first failure of each kind raises one notification (with *Copy Command* for a missing Ollama model, *Open Settings*, *Show Log*); later ones only mark the status bar and the log, so a stopped server does not pop up on every keystroke.
 - Completions are offered in normal editors, notebook cells, remote and virtual workspaces — not in output panes, diff views or the commit message box. Untrusted workspaces are supported; nothing is sent anywhere but to the server you configured.
 
 ## Development
@@ -95,6 +135,8 @@ npm run compile          # tsc -> out/
 npm run watch
 npm test                 # unit tests (node --test)
 npm run test:integration # real VS Code via vscode-test
+npm run format           # prettier --write
+npm run format:check     # prettier --check, run by CI
 npm run package          # -> local-autocomplete-<version>.vsix
 ```
 
@@ -104,8 +146,10 @@ The integration test starts a stub Ollama server in-process (`/api/generate` and
 VSCODE_EXECUTABLE="/Applications/Visual Studio Code.app/Contents/Code" npm run test:integration
 ```
 
-`.vscode/` is not committed, so add your own launch config (or run `Extension Development Host`) to try the extension in a second VS Code window.
+`.vscode/` is committed with a launch config: press `F5` to start an Extension Development Host that runs the extension from `out/`.
+
+GitHub Actions runs the format check, the compile and the unit tests on Linux, macOS and Windows, and the integration tests under Xvfb (`.github/workflows/ci.yml`). Pushing a `v*` tag builds the `.vsix` and attaches it to the release.
 
 ## License
 
-No license file or `license` field yet, and `package.json` is marked `private: true` — pick one before publishing.
+[MIT](LICENSE).

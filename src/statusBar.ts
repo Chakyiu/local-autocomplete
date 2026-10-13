@@ -25,7 +25,6 @@ export class StatusBar implements vscode.Disposable {
       }),
     );
     this.render();
-    this.item.show();
   }
 
   dispose(): void {
@@ -63,6 +62,7 @@ export class StatusBar implements vscode.Disposable {
       error: this.error,
       model: settings.model,
       server: describeServer(settings),
+      display: settings.statusBar,
     });
   }
 
@@ -71,5 +71,7 @@ export class StatusBar implements vscode.Disposable {
     this.item.text = view.text;
     this.item.tooltip = view.tooltip;
     this.item.backgroundColor = view.warning ? new vscode.ThemeColor('statusBarItem.warningBackground') : undefined;
+    if (view.visible) this.item.show();
+    else this.item.hide();
   }
 }

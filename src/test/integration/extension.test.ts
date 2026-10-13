@@ -14,7 +14,7 @@ const settings = () => vscode.workspace.getConfiguration('localAutocomplete');
 
 /** Puts back everything the tests change, including what a failed test left behind. */
 async function resetEnablement(): Promise<void> {
-  for (const key of ['enable', 'disabledLanguages', 'model']) {
+  for (const key of ['enable', 'disabledLanguages', 'model', 'stream', 'maxPrefixChars']) {
     await settings().update(key, undefined, vscode.ConfigurationTarget.Global);
   }
   await vscode.commands.executeCommand('localAutocomplete.forgetFileSettings');
@@ -33,7 +33,7 @@ async function open(language: string, text: string): Promise<vscode.TextEditor> 
 async function acceptSuggestion(editor: vscode.TextEditor, timeoutMs = 5000): Promise<boolean> {
   const before = editor.document.getText();
   await vscode.commands.executeCommand('editor.action.inlineSuggest.trigger');
-  for (const deadline = Date.now() + timeoutMs; Date.now() < deadline; ) {
+  for (const deadline = Date.now() + timeoutMs; Date.now() < deadline;) {
     await sleep(50);
     await vscode.commands.executeCommand('editor.action.inlineSuggest.commit');
     if (editor.document.getText() !== before) return true;
@@ -54,7 +54,7 @@ async function refocusEditor(): Promise<void> {
 async function pickFirstItem(command: string): Promise<void> {
   let finished = false;
   const running = Promise.resolve(vscode.commands.executeCommand(command)).finally(() => (finished = true));
-  for (const deadline = Date.now() + 5000; !finished && Date.now() < deadline; ) {
+  for (const deadline = Date.now() + 5000; !finished && Date.now() < deadline;) {
     await sleep(100);
     await vscode.commands.executeCommand('workbench.action.acceptSelectedQuickOpenItem');
   }
@@ -62,27 +62,46 @@ async function pickFirstItem(command: string): Promise<void> {
 }
 
 describe('Local Autocomplete in VS Code', () => {
-  /** Stands in for Ollama: answers every completion with `reply` and records the prompts. */
+  /** Stands in for Ollama: answers every completion with `reply` and records what was asked for. */
   let server: http.Server;
   let reply = '';
-  const prompts: string[] = [];
-  const promptsMentioning = (text: string) => prompts.filter((prompt) => prompt.includes(text));
+  const requests: { prompt: string; stream: boolean; numCtx?: number }[] = [];
+  const asked = (text: string) => requests.filter((entry) => entry.prompt.includes(text));
+  const lastAsk = (text: string) => asked(text)[asked(text).length - 1];
 
   before(async () => {
     server = http.createServer((request, response) => {
       let body = '';
       request.on('data', (chunk) => (body += chunk));
       request.on('end', () => {
-        response.setHeader('Content-Type', 'application/json');
-        if (request.url === '/api/generate') {
-          prompts.push(JSON.parse(body).prompt);
-          response.end(JSON.stringify({ response: reply, done: true }));
-        } else if (request.url === '/api/tags') {
+        if (request.url === '/api/tags') {
+          response.setHeader('Content-Type', 'application/json');
           response.end(JSON.stringify({ models: [{ name: 'starcoder2:3b' }, { name: 'qwen2.5-coder:1.5b-base' }] }));
-        } else {
-          response.statusCode = 404;
-          response.end(JSON.stringify({ error: 'not found' }));
+          return;
         }
+        if (request.url !== '/api/generate') {
+          response.statusCode = 404;
+          response.setHeader('Content-Type', 'application/json');
+          response.end(JSON.stringify({ error: 'not found' }));
+          return;
+        }
+
+        const sent = JSON.parse(body);
+        requests.push({ prompt: sent.prompt, stream: sent.stream === true, numCtx: sent.options?.num_ctx });
+        if (!sent.stream) {
+          response.setHeader('Content-Type', 'application/json');
+          response.end(JSON.stringify({ response: reply, done: true }));
+          return;
+        }
+
+        // Ollama answers a streaming request with one JSON object per line, in small pieces, so that
+        // the extension has to put the reply back together rather than read one object.
+        response.setHeader('Content-Type', 'application/x-ndjson');
+        for (const chunk of reply.match(/[\s\S]{1,6}/g) ?? []) {
+          response.write(`${JSON.stringify({ response: chunk })}\n`);
+        }
+        response.write(`${JSON.stringify({ response: '', done: true, eval_count: 12 })}\n`);
+        response.end();
       });
     });
     await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
@@ -99,7 +118,9 @@ describe('Local Autocomplete in VS Code', () => {
 
   after(async () => {
     await settings().update('endpoint', undefined, vscode.ConfigurationTarget.Global);
-    await vscode.workspace.getConfiguration('editor').update('quickSuggestions', undefined, vscode.ConfigurationTarget.Global);
+    await vscode.workspace
+      .getConfiguration('editor')
+      .update('quickSuggestions', undefined, vscode.ConfigurationTarget.Global);
     server.closeAllConnections();
     await new Promise((resolve) => server.close(resolve));
   });
@@ -117,7 +138,7 @@ describe('Local Autocomplete in VS Code', () => {
 
     assert.equal(await acceptSuggestion(editor), true);
     assert.equal(editor.document.getText(), 'const greeting = "hello world";');
-    assert.equal(promptsMentioning('greeting')[0], '<|fim_prefix|>const greeting = "hello <|fim_suffix|><|fim_middle|>');
+    assert.equal(asked('greeting')[0].prompt, '<|fim_prefix|>const greeting = "hello <|fim_suffix|><|fim_middle|>');
   });
 
   it('completes inside auto-closed brackets without duplicating them', async () => {
@@ -141,13 +162,13 @@ describe('Local Autocomplete in VS Code', () => {
     reply = 'computeTotal(items);';
 
     await vscode.commands.executeCommand('editor.action.inlineSuggest.trigger');
-    for (const deadline = Date.now() + 5000; promptsMentioning('typedAhead').length === 0 && Date.now() < deadline; ) {
+    for (const deadline = Date.now() + 5000; asked('typedAhead').length === 0 && Date.now() < deadline;) {
       await sleep(50);
     }
     await sleep(200);
     await vscode.commands.executeCommand('type', { text: 'comp' });
     await sleep(500);
-    const requestsBeforeAccepting = promptsMentioning('typedAhead').length;
+    const requestsBeforeAccepting = asked('typedAhead').length;
     await vscode.commands.executeCommand('editor.action.inlineSuggest.commit');
 
     assert.equal(editor.document.getText(), 'const typedAhead = computeTotal(items);');
@@ -160,7 +181,7 @@ describe('Local Autocomplete in VS Code', () => {
 
     await pickFirstItem('localAutocomplete.showMenu');
     assert.equal(await acceptSuggestion(editor, 1000), false);
-    assert.equal(promptsMentioning('fromMenu').length, 0);
+    assert.equal(asked('fromMenu').length, 0);
 
     await pickFirstItem('localAutocomplete.showMenu');
     assert.equal(await acceptSuggestion(editor), true);
@@ -174,7 +195,7 @@ describe('Local Autocomplete in VS Code', () => {
     await vscode.commands.executeCommand('localAutocomplete.toggleLanguage');
     assert.deepEqual(settings().get('disabledLanguages'), ['typescript']);
     assert.equal(await acceptSuggestion(editor, 1000), false);
-    assert.equal(promptsMentioning('byLanguage').length, 0);
+    assert.equal(asked('byLanguage').length, 0);
 
     await vscode.commands.executeCommand('localAutocomplete.toggleFile');
     await refocusEditor();
@@ -193,7 +214,7 @@ describe('Local Autocomplete in VS Code', () => {
     await vscode.commands.executeCommand('localAutocomplete.toggleEverywhere');
     assert.equal(settings().get('enable'), false);
     assert.equal(await acceptSuggestion(editor, 1000), false);
-    assert.equal(promptsMentioning('everywhere').length, 0);
+    assert.equal(asked('everywhere').length, 0);
 
     await vscode.commands.executeCommand('localAutocomplete.toggleEverywhere');
     assert.equal(settings().inspect('enable')?.globalValue, undefined);
@@ -205,5 +226,33 @@ describe('Local Autocomplete in VS Code', () => {
   it('picks a model from the ones on the server', async () => {
     await pickFirstItem('localAutocomplete.selectModel');
     assert.equal(settings().get('model'), 'starcoder2:3b');
+  });
+
+  it('reads the reply as it is generated, and can be switched back to a single response', async () => {
+    const editor = await open('typescript', 'const streamed = ‸');
+    reply = '42;';
+
+    assert.equal(await acceptSuggestion(editor), true);
+    assert.equal(lastAsk('streamed').stream, true);
+
+    await settings().update('stream', false, vscode.ConfigurationTarget.Global);
+    await refocusEditor();
+    reply = '43;';
+    assert.equal(await acceptSuggestion(editor), true);
+
+    assert.equal(lastAsk('streamed').stream, false);
+    assert.equal(editor.document.getText(), 'const streamed = 42;43;');
+  });
+
+  it('asks Ollama for a bigger context window when the prompt outgrows its default', async () => {
+    // Ollama cuts the front off a prompt that does not fit and only warns in its own log, so a long
+    // context is useless unless the request says how much room it needs.
+    await settings().update('maxPrefixChars', 20_000, vscode.ConfigurationTarget.Global);
+    const editor = await open('typescript', `${'const pad = 1234567890;\n'.repeat(600)}const needsContext = ‸`);
+    reply = '1;';
+
+    assert.equal(await acceptSuggestion(editor), true);
+    const askedFor = lastAsk('needsContext')!;
+    assert.ok(askedFor.numCtx !== undefined && askedFor.numCtx > 4096, `num_ctx was ${askedFor.numCtx}`);
   });
 });
