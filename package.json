@@ -3,8 +3,13 @@
   "displayName": "Local Autocomplete",
   "description": "Inline code completions from a local LLM (Ollama, LM Studio, llama.cpp, vLLM), switchable per file, per language, or everywhere from the status bar.",
   "version": "0.1.0",
-  "publisher": "chakyiu",
+  "publisher": "ChakyiuLI",
+  "license": "MIT",
   "private": true,
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ChakyiuLI/local-autocomplete.git"
+  },
   "engines": {
     "vscode": "^1.90.0"
   },
@@ -247,7 +252,7 @@
     "pretest": "npm run compile",
     "test": "node --test \"out/test/unit/**/*.test.js\"",
     "test:integration": "npm run compile && vscode-test",
-    "package": "npx --yes @vscode/vsce@^4 package --skip-license --allow-missing-repository"
+    "package": "npx --yes @vscode/vsce@^4 package"
   },
   "devDependencies": {
     "@types/mocha": "^10.0.10",

@@ -1,9 +1,12 @@
 import * as assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import * as http from 'node:http';
 import type { AddressInfo } from 'node:net';
+import * as path from 'node:path';
 import * as vscode from 'vscode';
 
-const EXTENSION_ID = 'chakyiu.local-autocomplete';
+const manifest = JSON.parse(readFileSync(path.join(__dirname, '../../../package.json'), 'utf8'));
+const EXTENSION_ID = `${manifest.publisher}.${manifest.name}`;
 const CURSOR = '‸';
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
