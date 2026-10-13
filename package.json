@@ -1,0 +1,260 @@
+{
+  "name": "local-autocomplete",
+  "displayName": "Local Autocomplete",
+  "description": "Inline code completions from a local LLM (Ollama, LM Studio, llama.cpp, vLLM), switchable per file, per language, or everywhere from the status bar.",
+  "version": "0.1.0",
+  "publisher": "chakyiu",
+  "private": true,
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Machine Learning",
+    "Other"
+  ],
+  "keywords": [
+    "autocomplete",
+    "inline completion",
+    "llm",
+    "ollama",
+    "lm studio",
+    "llama.cpp",
+    "fill-in-the-middle",
+    "offline"
+  ],
+  "extensionKind": [
+    "ui",
+    "workspace"
+  ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": true
+    },
+    "virtualWorkspaces": true
+  },
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "localAutocomplete.showMenu",
+        "title": "Show Menu",
+        "category": "Local Autocomplete"
+      },
+      {
+        "command": "localAutocomplete.toggleFile",
+        "title": "Toggle for Current File",
+        "category": "Local Autocomplete"
+      },
+      {
+        "command": "localAutocomplete.toggleLanguage",
+        "title": "Toggle for Current Language",
+        "category": "Local Autocomplete"
+      },
+      {
+        "command": "localAutocomplete.toggleEverywhere",
+        "title": "Toggle Everywhere",
+        "category": "Local Autocomplete"
+      },
+      {
+        "command": "localAutocomplete.selectModel",
+        "title": "Select Model",
+        "category": "Local Autocomplete"
+      },
+      {
+        "command": "localAutocomplete.forgetFileSettings",
+        "title": "Forget All Per-File Settings",
+        "category": "Local Autocomplete"
+      },
+      {
+        "command": "localAutocomplete.showLog",
+        "title": "Show Log",
+        "category": "Local Autocomplete"
+      }
+    ],
+    "menus": {
+      "commandPalette": [
+        {
+          "command": "localAutocomplete.toggleFile",
+          "when": "editorIsOpen"
+        },
+        {
+          "command": "localAutocomplete.toggleLanguage",
+          "when": "editorIsOpen"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Local Autocomplete",
+      "properties": {
+        "localAutocomplete.enable": {
+          "type": "boolean",
+          "default": true,
+          "order": 0,
+          "markdownDescription": "Turn inline completions on or off everywhere. When off, nothing is sent to the model, whatever the per-language and per-file settings say. Also available from the status bar."
+        },
+        "localAutocomplete.disabledLanguages": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true,
+          "default": [],
+          "order": 1,
+          "markdownDescription": "[Language identifiers](https://code.visualstudio.com/docs/languages/identifiers) where completions are off, for example `markdown` or `plaintext`. A single file can still be turned back on from the status bar menu."
+        },
+        "localAutocomplete.provider": {
+          "type": "string",
+          "enum": [
+            "ollama",
+            "openai-compatible"
+          ],
+          "markdownEnumDescriptions": [
+            "[Ollama](https://ollama.com), through its native `/api/generate` API.",
+            "Any server with an OpenAI-style `/v1/completions` endpoint: LM Studio, llama.cpp's `llama-server`, vLLM, LocalAI, …"
+          ],
+          "default": "ollama",
+          "scope": "machine",
+          "order": 2,
+          "description": "The kind of server that runs the model."
+        },
+        "localAutocomplete.endpoint": {
+          "type": "string",
+          "default": "",
+          "scope": "machine",
+          "order": 3,
+          "markdownDescription": "Base URL of the server. Leave empty for the default of `#localAutocomplete.provider#`: `http://127.0.0.1:11434` for Ollama, `http://127.0.0.1:1234/v1` for OpenAI-compatible servers (LM Studio's default; `llama-server` listens on `http://127.0.0.1:8080/v1`)."
+        },
+        "localAutocomplete.model": {
+          "type": "string",
+          "default": "qwen2.5-coder:1.5b-base",
+          "order": 4,
+          "markdownDescription": "Model name as the server knows it. Use a code model trained for fill-in-the-middle, preferably a base (non-instruct) variant. Run **Local Autocomplete: Select Model** to choose from the models on the server."
+        },
+        "localAutocomplete.apiKey": {
+          "type": "string",
+          "default": "",
+          "scope": "machine",
+          "order": 5,
+          "markdownDescription": "Sent as a bearer token. Only needed if your server requires one."
+        },
+        "localAutocomplete.fimTemplate": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "qwen",
+            "codellama",
+            "deepseek",
+            "starcoder",
+            "codegemma",
+            "codestral",
+            "custom"
+          ],
+          "markdownEnumDescriptions": [
+            "Choose from the model name. Unrecognized models get the Qwen format.",
+            "Qwen2.5-Coder, Qwen3-Coder: `<|fim_prefix|>…<|fim_suffix|>…<|fim_middle|>`",
+            "Code Llama: `<PRE> … <SUF>… <MID>`",
+            "DeepSeek-Coder: `<｜fim▁begin｜>…<｜fim▁hole｜>…<｜fim▁end｜>`",
+            "StarCoder, StarCoder2, Granite Code, Stable Code: `<fim_prefix>…<fim_suffix>…<fim_middle>`",
+            "CodeGemma: `<|fim_prefix|>…<|fim_suffix|>…<|fim_middle|>`",
+            "Codestral: `[SUFFIX]…[PREFIX]…`",
+            "Use `#localAutocomplete.customFimTemplate#`."
+          ],
+          "default": "auto",
+          "order": 6,
+          "markdownDescription": "Fill-in-the-middle prompt format. Each model family is trained on its own special tokens, and a mismatch gives poor or empty completions."
+        },
+        "localAutocomplete.customFimTemplate": {
+          "type": "string",
+          "default": "<|fim_prefix|>{prefix}<|fim_suffix|>{suffix}<|fim_middle|>",
+          "pattern": "[\\s\\S]*\\{prefix\\}[\\s\\S]*",
+          "patternErrorMessage": "The template must contain {prefix}.",
+          "order": 7,
+          "markdownDescription": "Prompt used when `#localAutocomplete.fimTemplate#` is `custom`. `{prefix}` is replaced with the code before the cursor and `{suffix}` with the code after it. Add the model's end-of-text tokens to `#localAutocomplete.stopSequences#`."
+        },
+        "localAutocomplete.stopSequences": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "order": 8,
+          "markdownDescription": "Extra sequences that end a completion, on top of the ones that come with the prompt format."
+        },
+        "localAutocomplete.multiline": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "always",
+            "never"
+          ],
+          "enumDescriptions": [
+            "Multi-line on empty lines and after an opening bracket or colon at the end of a line; single-line elsewhere.",
+            "Always allow multi-line completions.",
+            "Only complete the current line."
+          ],
+          "default": "auto",
+          "order": 9,
+          "description": "When completions may span several lines."
+        },
+        "localAutocomplete.maxTokens": {
+          "type": "integer",
+          "default": 128,
+          "minimum": 1,
+          "maximum": 4096,
+          "order": 10,
+          "description": "Maximum number of tokens to generate per completion."
+        },
+        "localAutocomplete.temperature": {
+          "type": "number",
+          "default": 0.1,
+          "minimum": 0,
+          "maximum": 2,
+          "order": 11,
+          "description": "Sampling temperature. Lower values give more predictable completions."
+        },
+        "localAutocomplete.debounceMs": {
+          "type": "integer",
+          "default": 200,
+          "minimum": 0,
+          "maximum": 5000,
+          "order": 12,
+          "description": "How long to wait after you stop typing before asking the model, in milliseconds."
+        },
+        "localAutocomplete.maxPrefixChars": {
+          "type": "integer",
+          "default": 4000,
+          "minimum": 0,
+          "order": 13,
+          "description": "Maximum number of characters before the cursor to send as context (roughly 3-4 characters per token). More context can improve completions but makes requests slower, and the whole prompt must fit in the model's context window."
+        },
+        "localAutocomplete.maxSuffixChars": {
+          "type": "integer",
+          "default": 1000,
+          "minimum": 0,
+          "order": 14,
+          "description": "Maximum number of characters after the cursor to send as context."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "pretest": "npm run compile",
+    "test": "node --test \"out/test/unit/**/*.test.js\"",
+    "test:integration": "npm run compile && vscode-test",
+    "package": "npx --yes @vscode/vsce@^4 package --skip-license --allow-missing-repository"
+  },
+  "devDependencies": {
+    "@types/mocha": "^10.0.10",
+    "@types/node": "^20.19.0",
+    "@types/vscode": "~1.90.0",
+    "@vscode/test-cli": "^0.0.15",
+    "@vscode/test-electron": "^3.1.0",
+    "typescript": "^7.0.2"
+  }
+}
