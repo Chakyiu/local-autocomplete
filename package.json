@@ -324,7 +324,7 @@
           "minimum": 1000,
           "maximum": 200000,
           "order": 21,
-          "markdownDescription": "Maximum characters of the diff sent when generating a commit message. A longer diff is cut from the end, and the model is told it was cut. Has to fit the context window: see `#localAutocomplete.maxContextTokens#`."
+          "markdownDescription": "Maximum characters of the staged diff sent when generating a commit message. A longer diff is cut from the end, and the model is told it was cut. Has to fit the context window: see `#localAutocomplete.maxContextTokens#`."
         },
         "localAutocomplete.showStatusBar": {
           "type": "string",

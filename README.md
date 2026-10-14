@@ -84,7 +84,7 @@ Per-language and everywhere state are settings, so they sync across machines and
 
 ## Commit messages
 
-The Source Control view has a sparkle button in its title bar, **Generate Commit Message**. It sends the staged diff to your model and writes the reply into the commit box. When nothing is staged, it uses the working tree instead, including new files that `git diff` leaves out. A notification shows while it runs, and Cancel leaves the box unchanged. Clicking the button again starts over.
+The Source Control view has a sparkle button in its title bar, **Generate Commit Message**. It sends only the staged diff (`git diff --cached`) to your model and writes the reply into the commit box. Unstaged and untracked files are left out; stage them first. If nothing is staged, the button tells you so and does not ask the model. A notification shows while it runs, and Cancel leaves the box unchanged. Clicking the button again starts over.
 
 The same command is in the status bar menu and the Command Palette. When Git opens `COMMIT_EDITMSG` in an editor (because VS Code is Git's `core.editor`), the button is on that editor's title bar and the message is written there.
 

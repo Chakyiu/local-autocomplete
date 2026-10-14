@@ -5,15 +5,11 @@ import { readSettings, type Settings } from './config';
 import { BackendError, createBackend, numCtxToRequest, requiredContextTokens } from './core/backends';
 import {
   COMMIT_MESSAGE_MAX_TOKENS,
-  GIT_STATUS_UNTRACKED,
   buildCommitPrompt,
   chooseRepository,
   cleanCommitMessage,
   limitDiff,
-  renderWorkingTreeDiff,
   subjectsFromLog,
-  untrackedUris,
-  type DiffFile,
 } from './core/commitMessage';
 import { backendOptions } from './core/settings';
 import { loadGit, type GitChange, type GitRepository } from './git';
@@ -21,9 +17,6 @@ import type { RequestReporter } from './reporter';
 
 /** Low, so the same diff keeps producing the same message, but not zero. */
 const TEMPERATURE = 0.2;
-const MAX_UNTRACKED_FILES = 30;
-/** Past this, the file is named in the prompt instead of being read into it. */
-const MAX_FILE_BYTES = 100_000;
 const MAX_HINT_CHARS = 1000;
 
 /**
@@ -112,7 +105,9 @@ export class CommitMessages implements vscode.Disposable {
       const collected = await collectDiff(repo, settings.commitMessageMaxDiffChars, signal);
       if (signal.aborted || generation !== this.generation) return;
       if (!collected) {
-        void vscode.window.showInformationMessage('Local Autocomplete: there are no changes to describe.');
+        void vscode.window.showInformationMessage(
+          'Local Autocomplete: nothing is staged. Stage the files this commit should include, then try again.',
+        );
         return;
       }
 
@@ -186,73 +181,19 @@ export class CommitMessages implements vscode.Disposable {
   }
 }
 
-interface CollectedDiff {
-  diff: string;
-  staged: boolean;
-  truncated: boolean;
-}
-
+/** `git diff --cached`: the files a commit would record, and nothing still sitting in the working tree. */
 async function collectDiff(
   repo: GitRepository,
   maxChars: number,
   signal: AbortSignal,
-): Promise<CollectedDiff | undefined> {
+): Promise<{ diff: string; truncated: boolean } | undefined> {
   const staged = repo.state.indexChanges;
-  const working = repo.state.workingTreeChanges;
-  const untracked = repo.state.untrackedChanges ?? [];
-  if (staged.length === 0 && working.length === 0 && untracked.length === 0) return undefined;
-
-  if (staged.length > 0) {
-    const diff = (await repo.diff(true)).trim();
-    if (signal.aborted) return undefined;
-    return collected(true, limitDiff(diff === '' ? fileList(repo, staged) : diff, maxChars));
-  }
-
-  const tracked = working.some((change) => change.status !== GIT_STATUS_UNTRACKED);
-  const unstaged = tracked ? await repo.diff(false) : '';
-  const files = await readNewFiles(repo, untrackedUris(asRefs(working), asRefs(untracked)), signal);
+  if (staged.length === 0) return undefined;
+  const diff = (await repo.diff(true)).trim();
   if (signal.aborted) return undefined;
-  const rendered = renderWorkingTreeDiff(unstaged, files, maxChars);
-  if (rendered.text.trim() === '') {
-    return collected(false, limitDiff(fileList(repo, [...working, ...untracked]), maxChars));
-  }
-  return collected(false, rendered);
-}
-
-function collected(staged: boolean, diff: { text: string; truncated: boolean }): CollectedDiff {
-  return { staged, diff: diff.text, truncated: diff.truncated };
-}
-
-function asRefs(changes: readonly GitChange[]): { uri: string; status: number }[] {
-  return changes.map((change) => ({ uri: change.uri.toString(), status: change.status }));
-}
-
-async function readNewFiles(repo: GitRepository, uris: readonly string[], signal: AbortSignal): Promise<DiffFile[]> {
-  const files: DiffFile[] = [];
-  for (const key of uris.slice(0, MAX_UNTRACKED_FILES)) {
-    if (signal.aborted) return files;
-    const uri = vscode.Uri.parse(key);
-    const relative = relativePath(repo.rootUri, uri);
-    try {
-      const stat = await vscode.workspace.fs.stat(uri);
-      if (stat.type === vscode.FileType.Directory) continue;
-      if (stat.size > MAX_FILE_BYTES) {
-        files.push({ path: relative, omitted: `${stat.size} bytes` });
-        continue;
-      }
-      const bytes = await vscode.workspace.fs.readFile(uri);
-      if (bytes.includes(0)) {
-        files.push({ path: relative, omitted: 'binary' });
-        continue;
-      }
-      files.push({ path: relative, content: new TextDecoder().decode(bytes) });
-    } catch {
-      files.push({ path: relative, omitted: 'unreadable' });
-    }
-  }
-  const rest = uris.length - Math.min(uris.length, MAX_UNTRACKED_FILES);
-  if (rest > 0) files.push({ path: `${rest} more untracked files`, omitted: 'not included' });
-  return files;
+  // A staged binary file has an index entry but no text in `git diff --cached`.
+  const limited = limitDiff(diff === '' ? fileList(repo, staged) : diff, maxChars);
+  return { diff: limited.text, truncated: limited.truncated };
 }
 
 function fileList(repo: GitRepository, changes: readonly GitChange[]): string {

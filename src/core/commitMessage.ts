@@ -3,23 +3,14 @@ import * as path from 'node:path';
 /** Tokens reserved for the message itself. A subject and a short body fit well inside this. */
 export const COMMIT_MESSAGE_MAX_TOKENS = 256;
 
-/**
- * `Status.UNTRACKED` in the built-in Git extension. `git diff` never includes these files, so they
- * have to be read and added to the prompt separately. When `git.untrackedChanges` is `mixed` they
- * show up in the working tree group instead of their own.
- */
-export const GIT_STATUS_UNTRACKED = 7;
-
 export interface RepoRoot {
   /** Absolute filesystem path of the repository. */
   root: string;
 }
 
 export interface CommitPromptInput {
-  /** Unified diff, already trimmed to the character budget. */
+  /** Staged diff (`git diff --cached`), already trimmed to the character budget. */
   diff: string;
-  /** True when the diff is exactly what `git commit` would record. */
-  staged: boolean;
   /** Text already in the commit box. Empty when the user hasn't drafted anything. */
   hint: string;
   /** Subject lines of recent commits, newest first, so the message can follow the repo's style. */
@@ -51,9 +42,7 @@ const PREAMBLE_PREFIX =
 
 export function buildCommitPrompt(input: CommitPromptInput): CommitPrompt {
   const lines = [
-    input.staged
-      ? 'Write a commit message for this staged diff.'
-      : 'Write a commit message for these unstaged working tree changes. Nothing is staged.',
+    'Write a commit message for this staged diff. It is exactly what git commit would record. Do not mention unstaged or untracked files.',
   ];
   if (input.truncated) lines.push('The diff was cut to fit the context window; do not guess at what was removed.');
   if (input.recentSubjects.length > 0) {
@@ -92,52 +81,6 @@ export function subjectsFromLog(messages: readonly string[], limit = 8): string[
     if (subjects.length === limit) break;
   }
   return subjects;
-}
-
-export interface ChangeRef {
-  /** `uri.toString()`, used only to tell two changes apart. */
-  uri: string;
-  status?: number;
-}
-
-/** Untracked files from either group, each uri once. `git diff` does not contain them. */
-export function untrackedUris(workingTree: readonly ChangeRef[], untracked: readonly ChangeRef[]): string[] {
-  const seen = new Set<string>();
-  const uris: string[] = [];
-  const add = (uri: string) => {
-    if (seen.has(uri)) return;
-    seen.add(uri);
-    uris.push(uri);
-  };
-  for (const change of untracked) add(change.uri);
-  for (const change of workingTree) if (change.status === GIT_STATUS_UNTRACKED) add(change.uri);
-  return uris;
-}
-
-export interface DiffFile {
-  /** Path relative to the repository, with forward slashes. */
-  path: string;
-  /** File text. Absent when the file could not be shown. */
-  content?: string;
-  /** Why `content` is absent, for example "binary" or "120000 bytes". */
-  omitted?: string;
-}
-
-/**
- * The working tree as one diff: `git diff` for tracked edits, then a synthetic patch per new file.
- * Cut from the end so the beginning, which `git diff` starts with the first changed file, survives.
- */
-export function renderWorkingTreeDiff(
-  unstagedDiff: string,
-  files: readonly DiffFile[],
-  maxChars: number,
-): { text: string; truncated: boolean } {
-  const chunks: string[] = [];
-  const tracked = unstagedDiff.trim();
-  if (tracked !== '') chunks.push(tracked);
-  for (const file of files)
-    chunks.push(file.content === undefined ? omittedFile(file) : newFileDiff(file.path, file.content));
-  return limitDiff(chunks.join('\n'), maxChars);
 }
 
 /** Cuts a diff at a line boundary and says so, so the model does not treat a half line as code. */
@@ -184,17 +127,4 @@ function contains(root: string, target: string): boolean {
 
 function stripTrailingSep(value: string): string {
   return value.length > 1 ? value.replace(/[\\/]+$/, '') : value;
-}
-
-function omittedFile(file: DiffFile): string {
-  return `New file ${file.path} (${file.omitted ?? 'omitted'})`;
-}
-
-/** A unified diff for a file git does not know about yet. */
-function newFileDiff(filePath: string, content: string): string {
-  const file = filePath.split('\\').join('/');
-  if (content.includes('\0')) return omittedFile({ path: file, omitted: 'binary' });
-  const lines = content.replace(/\r\n?/g, '\n').replace(/\n$/, '').split('\n');
-  const body = lines.map((line) => `+${line}`).join('\n');
-  return [`diff --git a/${file} b/${file}`, 'new file mode 100644', '--- /dev/null', `+++ b/${file}`, body].join('\n');
 }
