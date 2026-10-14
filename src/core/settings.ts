@@ -26,6 +26,8 @@ export interface Settings {
   keepAlive: string;
   stream: boolean;
   statusBar: StatusBarDisplay;
+  /** When false, the commit-message command and its buttons stay hidden. */
+  commitMessage: boolean;
   /** Empty means use `model`. An instruct model, not the fill-in-the-middle one. */
   commitMessageModel: string;
   commitMessageMaxDiffChars: number;
@@ -71,6 +73,7 @@ export function parseSettings(read: ReadSetting): Settings {
     keepAlive: text(read('keepAlive'), '').trim(),
     stream: bool(read('stream'), true),
     statusBar: choice(read('showStatusBar'), ['always', 'iconOnly', 'hidden'], 'always'),
+    commitMessage: bool(read('commitMessage'), true),
     commitMessageModel: text(read('commitMessageModel'), '').trim(),
     commitMessageMaxDiffChars: numberSetting(read('commitMessageMaxDiffChars'), 20_000, 1000, 200_000),
   };

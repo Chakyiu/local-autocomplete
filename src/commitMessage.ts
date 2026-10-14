@@ -39,6 +39,13 @@ export class CommitMessages implements vscode.Disposable {
   }
 
   async run(argument?: unknown): Promise<void> {
+    if (!readSettings().commitMessage) {
+      void vscode.window.showInformationMessage(
+        'Local Autocomplete: commit messages are turned off. Enable localAutocomplete.commitMessage to use them.',
+      );
+      return;
+    }
+
     const generation = ++this.generation;
     this.current?.abort();
     const abort = new AbortController();

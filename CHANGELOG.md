@@ -13,6 +13,7 @@ All notable changes to this extension are documented here. The format follows
   staged diff only and writes it into the commit box. Unstaged and untracked files are not included.
   Set `localAutocomplete.commitMessageModel` to an instruct model; the request uses the server's
   chat endpoint. `localAutocomplete.commitMessageMaxDiffChars` caps how much of the diff is sent.
+  `localAutocomplete.commitMessage` (on by default) hides the button and the command when set to `false`.
 
 ## [0.3.0] - 2026-10-14
 

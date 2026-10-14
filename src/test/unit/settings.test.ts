@@ -18,6 +18,7 @@ describe('parseSettings', () => {
     assert.equal(settings.stream, true);
     assert.equal(settings.statusBar, 'always');
     assert.equal(settings.keepAlive, '');
+    assert.equal(settings.commitMessage, true);
     assert.equal(settings.commitMessageModel, '');
     assert.equal(settings.commitMessageMaxDiffChars, 20_000);
   });
@@ -33,6 +34,8 @@ describe('parseSettings', () => {
   it('falls back to the default when a setting holds the wrong type', () => {
     assert.equal(withValues({ maxTokens: 'a lot' }).maxTokens, 128);
     assert.equal(withValues({ stream: 'yes' }).stream, true);
+    assert.equal(withValues({ commitMessage: 'yes' }).commitMessage, true);
+    assert.equal(withValues({ commitMessage: false }).commitMessage, false);
     assert.equal(withValues({ multiline: 'sometimes' }).multiline, 'auto');
     assert.equal(withValues({ provider: 'llama.cpp' }).provider, 'ollama');
     assert.equal(withValues({ showStatusBar: 'nope' }).statusBar, 'always');

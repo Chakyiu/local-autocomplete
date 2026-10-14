@@ -2,7 +2,7 @@
   "name": "local-autocomplete",
   "displayName": "Local Autocomplete",
   "description": "Inline code completions from a local LLM (Ollama, LM Studio, llama.cpp, vLLM), switchable per file, per language, or everywhere from the status bar.",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "publisher": "ChakyiuLI",
   "license": "MIT",
   "icon": "images/icon.png",
@@ -105,19 +105,23 @@
         {
           "command": "localAutocomplete.toggleLanguage",
           "when": "editorIsOpen"
+        },
+        {
+          "command": "localAutocomplete.generateCommitMessage",
+          "when": "config.localAutocomplete.commitMessage"
         }
       ],
       "scm/title": [
         {
           "command": "localAutocomplete.generateCommitMessage",
-          "when": "scmProvider == git",
+          "when": "scmProvider == git && config.localAutocomplete.commitMessage",
           "group": "navigation@100"
         }
       ],
       "editor/title": [
         {
           "command": "localAutocomplete.generateCommitMessage",
-          "when": "editorLangId == git-commit",
+          "when": "editorLangId == git-commit && config.localAutocomplete.commitMessage",
           "group": "navigation@100"
         }
       ]
@@ -312,10 +316,16 @@
           "order": 18,
           "markdownDescription": "How long Ollama keeps the model loaded after a request: `5m`, `30s`, `-1` to keep it forever, `0` to unload it right away. Leave empty for Ollama's own default of 5 minutes. Only Ollama uses this setting."
         },
+        "localAutocomplete.commitMessage": {
+          "type": "boolean",
+          "default": true,
+          "order": 20,
+          "markdownDescription": "Show **Generate Commit Message** and allow the command. When off, the sparkle button, the status bar menu item, and the Command Palette entry are hidden, and the command does not call the model."
+        },
         "localAutocomplete.commitMessageModel": {
           "type": "string",
           "default": "",
-          "order": 20,
+          "order": 21,
           "markdownDescription": "Model that drafts commit messages. Leave empty to use `#localAutocomplete.model#`. An instruct model follows the instructions; a base fill-in-the-middle model usually does not, and writes a poor message."
         },
         "localAutocomplete.commitMessageMaxDiffChars": {
@@ -323,7 +333,7 @@
           "default": 20000,
           "minimum": 1000,
           "maximum": 200000,
-          "order": 21,
+          "order": 22,
           "markdownDescription": "Maximum characters of the staged diff sent when generating a commit message. A longer diff is cut from the end, and the model is told it was cut. Has to fit the context window: see `#localAutocomplete.maxContextTokens#`."
         },
         "localAutocomplete.showStatusBar": {

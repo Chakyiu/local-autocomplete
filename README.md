@@ -86,7 +86,7 @@ Per-language and everywhere state are settings, so they sync across machines and
 
 The Source Control view has a sparkle button in its title bar, **Generate Commit Message**. It sends only the staged diff (`git diff --cached`) to your model and writes the reply into the commit box. Unstaged and untracked files are left out; stage them first. If nothing is staged, the button tells you so and does not ask the model. A notification shows while it runs, and Cancel leaves the box unchanged. Clicking the button again starts over.
 
-The same command is in the status bar menu and the Command Palette. When Git opens `COMMIT_EDITMSG` in an editor (because VS Code is Git's `core.editor`), the button is on that editor's title bar and the message is written there.
+The same command is in the status bar menu and the Command Palette. When Git opens `COMMIT_EDITMSG` in an editor (because VS Code is Git's `core.editor`), the button is on that editor's title bar and the message is written there. Set `commitMessage` to `false` to hide the button and the command.
 
 Set `commitMessageModel` to an instruct model. The default completion model is a base fill-in-the-middle model, which continues text instead of following "write a commit message", so it drafts a poor one. The request goes to the chat endpoint (`/api/chat` on Ollama, `/v1/chat/completions` otherwise), on the same server as completions.
 
@@ -113,6 +113,7 @@ Set `commitMessageModel` to an instruct model. The default completion model is a
 | `timeoutMs` | `30000` | How long to wait for the server. With streaming it is the time allowed **between** chunks, so a slow first token still fails but a steady stream does not |
 | `maxContextTokens` | `8192` | Largest context window the extension may ask Ollama for (`num_ctx`). `0` never sends it and leaves the server in charge |
 | `keepAlive` | `""` | Ollama only: how long to keep the model loaded, e.g. `5m`. Empty uses the server default |
+| `commitMessage` | `true` | Show the Generate Commit Message button and command |
 | `commitMessageModel` | `""` | Instruct model for commit messages. Empty uses `model` |
 | `commitMessageMaxDiffChars` | `20000` | Diff characters sent for a commit message; the rest is cut from the end |
 | `showStatusBar` | `always` | `always`, `iconOnly`, or `hidden` |

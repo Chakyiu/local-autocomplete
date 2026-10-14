@@ -46,6 +46,7 @@ export async function showMenu(
 
   const everywhere = enablement.enabledEverywhere();
   const apiKeySet = await apiKeys.isSet();
+  const settings = readSettings(document?.uri);
   items.push(
     {
       label: everywhere ? '$(circle-slash) Disable everywhere' : '$(check) Enable everywhere',
@@ -54,14 +55,18 @@ export async function showMenu(
     { label: '', kind: vscode.QuickPickItemKind.Separator },
     {
       label: '$(hubot) Select model…',
-      description: readSettings(document?.uri).model,
+      description: settings.model,
       run: () => vscode.commands.executeCommand('localAutocomplete.selectModel'),
     },
-    {
-      label: '$(sparkle) Generate commit message',
-      description: 'from the git diff',
-      run: () => vscode.commands.executeCommand('localAutocomplete.generateCommitMessage'),
-    },
+    ...(settings.commitMessage
+      ? [
+          {
+            label: '$(sparkle) Generate commit message',
+            description: 'from the staged diff',
+            run: () => vscode.commands.executeCommand('localAutocomplete.generateCommitMessage'),
+          } satisfies MenuItem,
+        ]
+      : []),
     {
       label: apiKeySet ? '$(key) Change API key…' : '$(key) Set API key…',
       description: apiKeySet ? 'kept in your keychain' : 'only needed by OpenAI-compatible servers',
