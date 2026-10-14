@@ -223,6 +223,11 @@ describe('Local Autocomplete in VS Code', () => {
     assert.equal(editor.document.getText(), 'everywhere = 3');
   });
 
+  it('offers a command that drafts a commit message', async () => {
+    const commands = await vscode.commands.getCommands(true);
+    assert.ok(commands.includes('localAutocomplete.generateCommitMessage'));
+  });
+
   it('picks a model from the ones on the server', async () => {
     await pickFirstItem('localAutocomplete.selectModel');
     assert.equal(settings().get('model'), 'starcoder2:3b');

@@ -18,6 +18,8 @@ describe('parseSettings', () => {
     assert.equal(settings.stream, true);
     assert.equal(settings.statusBar, 'always');
     assert.equal(settings.keepAlive, '');
+    assert.equal(settings.commitMessageModel, '');
+    assert.equal(settings.commitMessageMaxDiffChars, 20_000);
   });
 
   it('keeps a value inside the range the setting allows', () => {

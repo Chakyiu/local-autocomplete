@@ -170,6 +170,46 @@ describe('backends', () => {
       await assert.rejects(ollama().complete(request), failsWith('context-overflow', /context window/));
     });
 
+    it('sends a commit message as chat, so the model template is applied', async () => {
+      respond = json(200, { message: { role: 'assistant', content: 'feat: add x' }, eval_count: 4 });
+      const result = await ollama().chat({
+        messages: [
+          { role: 'system', content: 'Write a commit message.' },
+          { role: 'user', content: 'Diff:\n+x' },
+        ],
+        maxTokens: 256,
+        temperature: 0.2,
+        contextTokens: 8192,
+      });
+
+      assert.deepEqual(result, { text: 'feat: add x', tokens: 4 });
+      assert.equal(received[0].url, '/api/chat');
+      assert.deepEqual(received[0].body, {
+        model: 'qwen2.5-coder:1.5b-base',
+        messages: [
+          { role: 'system', content: 'Write a commit message.' },
+          { role: 'user', content: 'Diff:\n+x' },
+        ],
+        stream: false,
+        options: { temperature: 0.2, num_predict: 256, num_ctx: 8192 },
+      });
+    });
+
+    it('reassembles a streamed chat reply', async () => {
+      respond = ndjson([
+        { message: { role: 'assistant', content: 'feat' } },
+        { message: { role: 'assistant', content: ': add x' } },
+        { message: { content: '' }, done: true, eval_count: 5 },
+      ]);
+      assert.deepEqual(
+        await ollama().streamChat(
+          { messages: [{ role: 'user', content: 'diff' }], maxTokens: 32, temperature: 0.2 },
+          () => false,
+        ),
+        { text: 'feat: add x', tokens: 5 },
+      );
+    });
+
     it('reports a model that has not been pulled', async () => {
       respond = json(404, { error: 'model "qwen2.5-coder:1.5b-base" not found, try pulling it first' });
       await assert.rejects(ollama().complete(request), failsWith('model-not-found', /try pulling it first/));
@@ -205,6 +245,29 @@ describe('backends', () => {
       respond = json(200, { data: [{ id: 'a' }, { id: 'b' }] });
       assert.deepEqual(await openai().listModels(), ['a', 'b']);
       assert.equal(received[0].url, '/v1/models');
+    });
+
+    it('asks /v1/chat/completions for a commit message, with a system and a user turn', async () => {
+      respond = json(200, {
+        choices: [{ message: { role: 'assistant', content: 'fix: the timeout' } }],
+        usage: { completion_tokens: 6 },
+      });
+      const result = await openai('secret').chat({
+        messages: [
+          { role: 'system', content: 'Write a commit message.' },
+          { role: 'user', content: 'Diff:\n+x' },
+        ],
+        maxTokens: 256,
+        temperature: 0.2,
+      });
+
+      assert.deepEqual(result, { text: 'fix: the timeout', tokens: 6 });
+      assert.equal(received[0].url, '/v1/chat/completions');
+      assert.equal(received[0].headers.authorization, 'Bearer secret');
+      assert.deepEqual((received[0].body as { messages: unknown }).messages, [
+        { role: 'system', content: 'Write a commit message.' },
+        { role: 'user', content: 'Diff:\n+x' },
+      ]);
     });
 
     it('points at openai-chat when the server has no raw completions route', async () => {

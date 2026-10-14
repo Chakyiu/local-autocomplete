@@ -78,6 +78,24 @@ export interface CompletionResult {
   tokens?: number;
 }
 
+export interface ChatMessage {
+  role: 'system' | 'user';
+  content: string;
+}
+
+/**
+ * An instruction, not a fill-in-the-middle prompt. Commit messages go through this: a base completion
+ * model continues text, it does not follow "write a commit message".
+ */
+export interface ChatRequest {
+  messages: readonly ChatMessage[];
+  maxTokens: number;
+  temperature: number;
+  /** Same role as `CompletionRequest.contextTokens`: room Ollama must keep for the whole exchange. */
+  contextTokens?: number;
+  signal?: AbortSignal;
+}
+
 export interface Backend {
   readonly baseUrl: string;
   complete(request: CompletionRequest): Promise<CompletionResult>;
@@ -86,6 +104,9 @@ export interface Backend {
    * the rest of the generation is cancelled and the result holds everything given so far.
    */
   streamComplete(request: CompletionRequest, onText: (chunk: string) => boolean): Promise<CompletionResult>;
+  chat(request: ChatRequest): Promise<CompletionResult>;
+  /** Like `streamComplete`, for a chat exchange. Return true from `onText` to stop early. */
+  streamChat(request: ChatRequest, onText: (chunk: string) => boolean): Promise<CompletionResult>;
   listModels(signal?: AbortSignal): Promise<string[]>;
 }
 
@@ -191,6 +212,61 @@ class OllamaBackend implements Backend {
     return { text, tokens };
   }
 
+  async chat(request: ChatRequest): Promise<CompletionResult> {
+    const body = await requestJson(
+      this.baseUrl,
+      '/api/chat',
+      this.options,
+      request.signal,
+      this.chatPayload(request, false),
+    );
+    const message = isRecord(body) && isRecord(body.message) ? body.message : undefined;
+    if (!isRecord(body) || typeof message?.content !== 'string') throw invalidResponse(this.baseUrl, '/api/chat');
+    return { text: message.content, tokens: numberOrUndefined(body.eval_count) };
+  }
+
+  async streamChat(request: ChatRequest, onText: (chunk: string) => boolean): Promise<CompletionResult> {
+    let text = '';
+    let tokens: number | undefined;
+    await readLines(
+      this.baseUrl,
+      '/api/chat',
+      this.options,
+      request.signal,
+      this.chatPayload(request, true),
+      (line) => {
+        const event = parseJsonObject(line);
+        if (event === undefined) return false;
+        if (event.done === true) tokens = numberOrUndefined(event.eval_count);
+        const content = isRecord(event.message) ? event.message.content : undefined;
+        if (typeof content !== 'string' || content === '') return false;
+        text += content;
+        return onText(content);
+      },
+    );
+    return { text, tokens };
+  }
+
+  /** Chat, so Ollama applies the model's template. `raw` would send the messages as literal text. */
+  private chatPayload(request: ChatRequest, stream: boolean): Record<string, unknown> {
+    const numCtx =
+      request.contextTokens !== undefined && request.contextTokens > OLLAMA_DEFAULT_NUM_CTX
+        ? request.contextTokens
+        : undefined;
+    const keepAlive = this.options.keepAlive?.trim();
+    return {
+      model: this.options.model,
+      messages: request.messages,
+      stream,
+      options: {
+        temperature: request.temperature,
+        num_predict: request.maxTokens,
+        ...(numCtx === undefined ? {} : { num_ctx: numCtx }),
+      },
+      ...(keepAlive ? { keep_alive: keepAlive } : {}),
+    };
+  }
+
   async listModels(signal?: AbortSignal): Promise<string[]> {
     const body = await requestJson(this.baseUrl, '/api/tags', this.options, signal);
     const models = isRecord(body) && Array.isArray(body.models) ? body.models : [];
@@ -259,6 +335,61 @@ class OpenAICompatibleBackend implements Backend {
     return { text: this.fence(text), tokens };
   }
 
+  async chat(request: ChatRequest): Promise<CompletionResult> {
+    return this.exchange(request, false);
+  }
+
+  async streamChat(request: ChatRequest, onText: (chunk: string) => boolean): Promise<CompletionResult> {
+    return this.exchange(request, true, onText);
+  }
+
+  /**
+   * Always `/chat/completions`, even for a server whose completions go to `/completions`. An instruct
+   * model follows a commit-message request; the raw completions route would only continue the text.
+   */
+  private async exchange(
+    request: ChatRequest,
+    stream: boolean,
+    onText?: (chunk: string) => boolean,
+  ): Promise<CompletionResult> {
+    const path = '/chat/completions';
+    const payload = {
+      model: this.options.model,
+      messages: request.messages,
+      max_tokens: request.maxTokens,
+      temperature: request.temperature,
+      stream,
+    };
+    if (!stream) {
+      const body = await requestJson(this.baseUrl, path, this.options, request.signal, payload);
+      const choice = isRecord(body) && Array.isArray(body.choices) ? body.choices[0] : undefined;
+      if (!isRecord(body) || !isRecord(choice)) throw invalidResponse(this.baseUrl, path);
+      const usage = isRecord(body.usage) ? body.usage.completion_tokens : undefined;
+      return { text: chatMessageText(this.baseUrl, path, choice), tokens: numberOrUndefined(usage) };
+    }
+
+    let text = '';
+    let tokens: number | undefined;
+    let sawReasoning = false;
+    await readLines(this.baseUrl, path, this.options, request.signal, payload, (line) => {
+      const data = line.startsWith('data:') ? line.slice(5).trim() : line;
+      if (data === '' || data === '[DONE]') return data === '[DONE]';
+      const event = parseJsonObject(data);
+      if (event === undefined) return false;
+      const usage = isRecord(event.usage) ? numberOrUndefined(event.usage.completion_tokens) : undefined;
+      if (usage !== undefined) tokens = usage;
+      const choice = Array.isArray(event.choices) ? event.choices[0] : undefined;
+      if (!isRecord(choice)) return false;
+      sawReasoning ||= isReasoningChunk(choice);
+      const delta = isRecord(choice.delta) && typeof choice.delta.content === 'string' ? choice.delta.content : '';
+      if (delta === '') return false;
+      text += delta;
+      return onText?.(delta) ?? false;
+    });
+    if (text === '' && sawReasoning) throw noMessageContent(this.baseUrl, path, true);
+    return { text, tokens };
+  }
+
   async listModels(signal?: AbortSignal): Promise<string[]> {
     const body = await requestJson(this.baseUrl, '/models', this.options, signal);
     const models = isRecord(body) && Array.isArray(body.data) ? body.data : [];
@@ -283,12 +414,7 @@ class OpenAICompatibleBackend implements Backend {
 
   /** Chat servers answer with `message.content`; `reasoning_content` is chain-of-thought, never code. */
   private chatText(choice: Record<string, unknown>, path: string): string {
-    const message = isRecord(choice.message) ? choice.message : undefined;
-    const content = message?.content;
-    if (typeof content === 'string') return content;
-    if (content !== null && content !== undefined) throw invalidResponse(this.baseUrl, path);
-    // A reasoning model can spend the whole reply on `reasoning_content` and leave `content` null.
-    throw noMessageContent(this.baseUrl, path, typeof message?.reasoning_content === 'string');
+    return chatMessageText(this.baseUrl, path, choice);
   }
 
   /**
@@ -305,6 +431,15 @@ class OpenAICompatibleBackend implements Backend {
 
 function isReasoningChunk(choice: Record<string, unknown>): boolean {
   return isRecord(choice.delta) && typeof choice.delta.reasoning_content === 'string';
+}
+
+function chatMessageText(baseUrl: string, path: string, choice: Record<string, unknown>): string {
+  const message = isRecord(choice.message) ? choice.message : undefined;
+  const content = message?.content;
+  if (typeof content === 'string') return content;
+  if (content !== null && content !== undefined) throw invalidResponse(baseUrl, path);
+  // A reasoning model can spend the whole reply on `reasoning_content` and leave `content` null.
+  throw noMessageContent(baseUrl, path, typeof message?.reasoning_content === 'string');
 }
 
 function noMessageContent(baseUrl: string, path: string, reasoning: boolean): BackendError {

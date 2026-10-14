@@ -58,6 +58,11 @@ export async function showMenu(
       run: () => vscode.commands.executeCommand('localAutocomplete.selectModel'),
     },
     {
+      label: '$(sparkle) Generate commit message',
+      description: 'from the git diff',
+      run: () => vscode.commands.executeCommand('localAutocomplete.generateCommitMessage'),
+    },
+    {
       label: apiKeySet ? '$(key) Change API key…' : '$(key) Set API key…',
       description: apiKeySet ? 'kept in your keychain' : 'only needed by OpenAI-compatible servers',
       run: () => setApiKey(apiKeys),

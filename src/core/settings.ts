@@ -26,6 +26,9 @@ export interface Settings {
   keepAlive: string;
   stream: boolean;
   statusBar: StatusBarDisplay;
+  /** Empty means use `model`. An instruct model, not the fill-in-the-middle one. */
+  commitMessageModel: string;
+  commitMessageMaxDiffChars: number;
 }
 
 export const DEFAULT_MODEL = 'qwen2.5-coder:1.5b-base';
@@ -68,6 +71,8 @@ export function parseSettings(read: ReadSetting): Settings {
     keepAlive: text(read('keepAlive'), '').trim(),
     stream: bool(read('stream'), true),
     statusBar: choice(read('showStatusBar'), ['always', 'iconOnly', 'hidden'], 'always'),
+    commitMessageModel: text(read('commitMessageModel'), '').trim(),
+    commitMessageMaxDiffChars: numberSetting(read('commitMessageMaxDiffChars'), 20_000, 1000, 200_000),
   };
 }
 

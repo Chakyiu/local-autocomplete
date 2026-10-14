@@ -4,6 +4,16 @@ All notable changes to this extension are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Generate Commit Message.** A sparkle button in the Source Control title bar (and on the
+  `COMMIT_EDITMSG` editor, the status bar menu, and the Command Palette) drafts a message from the
+  staged diff, or from the working tree when nothing is staged, and writes it into the commit box.
+  Set `localAutocomplete.commitMessageModel` to an instruct model; the request uses the server's
+  chat endpoint. `localAutocomplete.commitMessageMaxDiffChars` caps how much of the diff is sent.
+
 ## [0.3.0] - 2026-10-14
 
 ### Added

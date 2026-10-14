@@ -75,6 +75,12 @@
         "category": "Local Autocomplete"
       },
       {
+        "command": "localAutocomplete.generateCommitMessage",
+        "title": "Generate Commit Message",
+        "icon": "$(sparkle)",
+        "category": "Local Autocomplete"
+      },
+      {
         "command": "localAutocomplete.setApiKey",
         "title": "Set API Key",
         "category": "Local Autocomplete"
@@ -99,6 +105,20 @@
         {
           "command": "localAutocomplete.toggleLanguage",
           "when": "editorIsOpen"
+        }
+      ],
+      "scm/title": [
+        {
+          "command": "localAutocomplete.generateCommitMessage",
+          "when": "scmProvider == git",
+          "group": "navigation@100"
+        }
+      ],
+      "editor/title": [
+        {
+          "command": "localAutocomplete.generateCommitMessage",
+          "when": "editorLangId == git-commit",
+          "group": "navigation@100"
         }
       ]
     },
@@ -291,6 +311,20 @@
           "default": "",
           "order": 18,
           "markdownDescription": "How long Ollama keeps the model loaded after a request: `5m`, `30s`, `-1` to keep it forever, `0` to unload it right away. Leave empty for Ollama's own default of 5 minutes. Only Ollama uses this setting."
+        },
+        "localAutocomplete.commitMessageModel": {
+          "type": "string",
+          "default": "",
+          "order": 20,
+          "markdownDescription": "Model that drafts commit messages. Leave empty to use `#localAutocomplete.model#`. An instruct model follows the instructions; a base fill-in-the-middle model usually does not, and writes a poor message."
+        },
+        "localAutocomplete.commitMessageMaxDiffChars": {
+          "type": "integer",
+          "default": 20000,
+          "minimum": 1000,
+          "maximum": 200000,
+          "order": 21,
+          "markdownDescription": "Maximum characters of the diff sent when generating a commit message. A longer diff is cut from the end, and the model is told it was cut. Has to fit the context window: see `#localAutocomplete.maxContextTokens#`."
         },
         "localAutocomplete.showStatusBar": {
           "type": "string",

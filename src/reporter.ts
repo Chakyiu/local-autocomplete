@@ -21,13 +21,18 @@ export class RequestReporter {
     this.reset();
   }
 
-  failed(error: BackendError, settings: Settings): void {
+  /**
+   * `once` is for completions, where the same failure would otherwise pop up on every keystroke.
+   * A button the user just pressed reports every time. `commit` rewords the context-overflow hint,
+   * which otherwise talks about the characters before the cursor.
+   */
+  failed(error: BackendError, settings: Settings, source: 'completion' | 'commit' = 'completion'): void {
     if (error.message !== this.lastError) this.log.error(error.message);
     this.lastError = error.message;
     this.status.setError(error.message);
-    if (this.notified.has(error.kind)) return;
-    this.notified.add(error.kind);
-    void this.notify(error, settings);
+    if (source === 'completion' && this.notified.has(error.kind)) return;
+    if (source === 'completion') this.notified.add(error.kind);
+    void this.notify(error, settings, source);
   }
 
   /** Forgets earlier failures, after a success or when the server settings change. */
@@ -37,7 +42,7 @@ export class RequestReporter {
     this.status.setError(undefined);
   }
 
-  private async notify(error: BackendError, settings: Settings): Promise<void> {
+  private async notify(error: BackendError, settings: Settings, source: 'completion' | 'commit'): Promise<void> {
     const server = describeServer(settings);
     if (error.kind === 'model-not-found') {
       const pull = settings.provider === 'ollama' ? `ollama pull ${settings.model}` : undefined;
@@ -55,10 +60,14 @@ export class RequestReporter {
     }
 
     if (error.kind === 'context-overflow') {
+      const commit = source === 'commit';
       const choice = await vscode.window.showWarningMessage(
-        `Local Autocomplete: the prompt does not fit the context of ${server}, which was sent up to ` +
-          `${settings.maxPrefixChars} characters before the cursor.`,
-        'Halve the Context',
+        commit
+          ? `Local Autocomplete: the diff does not fit the context of ${server}. ` +
+              'Lower localAutocomplete.commitMessageMaxDiffChars, or raise localAutocomplete.maxContextTokens.'
+          : `Local Autocomplete: the prompt does not fit the context of ${server}, which was sent up to ` +
+              `${settings.maxPrefixChars} characters before the cursor.`,
+        ...(commit ? [] : ['Halve the Context']),
         'Open Settings',
         'Show Log',
       );

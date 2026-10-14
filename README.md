@@ -75,11 +75,20 @@ The status bar shows which switch decided the current file, and clicking it open
 | `Local Autocomplete: Toggle for Current Language` | Adds/removes the language in `disabledLanguages` |
 | `Local Autocomplete: Toggle for Current File` | Overrides for this file only |
 | `Local Autocomplete: Select Model` | Lists the models on the server and sets `localAutocomplete.model` |
+| `Local Autocomplete: Generate Commit Message` | Drafts a commit message from the git diff. Also the sparkle button in the Source Control title bar |
 | `Local Autocomplete: Set API Key` | Stores a bearer token in your OS keychain (also clears the deprecated setting) |
 | `Local Autocomplete: Forget All Per-File Settings` | Drops every per-file override |
 | `Local Autocomplete: Show Log` | Opens the output channel |
 
 Per-language and everywhere state are settings, so they sync across machines and can be set per workspace. Per-file choices are not.
+
+## Commit messages
+
+The Source Control view has a sparkle button in its title bar, **Generate Commit Message**. It sends the staged diff to your model and writes the reply into the commit box. When nothing is staged, it uses the working tree instead, including new files that `git diff` leaves out. A notification shows while it runs, and Cancel leaves the box unchanged. Clicking the button again starts over.
+
+The same command is in the status bar menu and the Command Palette. When Git opens `COMMIT_EDITMSG` in an editor (because VS Code is Git's `core.editor`), the button is on that editor's title bar and the message is written there.
+
+Set `commitMessageModel` to an instruct model. The default completion model is a base fill-in-the-middle model, which continues text instead of following "write a commit message", so it drafts a poor one. The request goes to the chat endpoint (`/api/chat` on Ollama, `/v1/chat/completions` otherwise), on the same server as completions.
 
 ## Settings
 
@@ -104,6 +113,8 @@ Per-language and everywhere state are settings, so they sync across machines and
 | `timeoutMs` | `30000` | How long to wait for the server. With streaming it is the time allowed **between** chunks, so a slow first token still fails but a steady stream does not |
 | `maxContextTokens` | `8192` | Largest context window the extension may ask Ollama for (`num_ctx`). `0` never sends it and leaves the server in charge |
 | `keepAlive` | `""` | Ollama only: how long to keep the model loaded, e.g. `5m`. Empty uses the server default |
+| `commitMessageModel` | `""` | Instruct model for commit messages. Empty uses `model` |
+| `commitMessageMaxDiffChars` | `20000` | Diff characters sent for a commit message; the rest is cut from the end |
 | `showStatusBar` | `always` | `always`, `iconOnly`, or `hidden` |
 
 `multiline`, `maxTokens`, `temperature`, `debounceMs`, `maxPrefixChars` and `maxSuffixChars` are language-overridable, so a `[python]` block in `settings.json` can ask for longer completions in Python than in JSON:
