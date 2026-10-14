@@ -4,7 +4,7 @@ All notable changes to this extension are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.4.0] - 2026-10-14
 
 ### Added
 
@@ -51,4 +51,5 @@ Initial release: inline ghost-text completions from a model server on your own m
 - CI (compile + unit tests on Linux/macOS/Windows, integration tests under Xvfb) and a release
   workflow that attaches the `.vsix` to a tag.
 
+[0.4.0]: https://github.com/ChakyiuLI/local-autocomplete/releases/tag/v0.4.0
 [0.1.0]: https://github.com/ChakyiuLI/local-autocomplete/releases/tag/v0.1.0

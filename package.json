@@ -2,7 +2,7 @@
   "name": "local-autocomplete",
   "displayName": "Local Autocomplete",
   "description": "Inline code completions from a local LLM (Ollama, LM Studio, llama.cpp, vLLM), switchable per file, per language, or everywhere from the status bar.",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "publisher": "ChakyiuLI",
   "license": "MIT",
   "icon": "images/icon.png",
